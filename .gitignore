@@ -1,0 +1,10 @@
+# Rooms saved by a local server
+rooms/
+# Downloaded and generated files (npm run fetch-generator, npm run build:cloudflare)
+vendor/
+cloudflare/site/
+cloudflare/generated/
+# Tools
+node_modules/
+.wrangler/
+cloudflare/.wrangler/

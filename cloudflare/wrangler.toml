@@ -1,0 +1,30 @@
+# The Cloudflare deployment: one Worker serving the page (site/, built by npm run build:cloudflare) and the rooms'
+# API (worker.js), with each room in a Durable Object.
+#   npm run dev:cloudflare      on this machine (Wrangler's local mode, no account needed)
+#   npm run deploy:cloudflare   to Cloudflare (needs `npx wrangler login` once)
+# Served at https://fog-mode.bq-bingo.workers.dev
+name = "fog-mode"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "./site"
+# Any page path that isn't a file (a room link /r/<code>, /play) gets index.html: the page routes itself.
+not_found_handling = "single-page-application"
+# The API is the Worker's; everything else is a file.
+run_worker_first = ["/api/*"]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[durable_objects.bindings]]
+name = "LIMITS"
+class_name = "CreateLimiter"
+
+# SQLite-backed Durable Objects (the only kind the Workers Free plan offers).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO", "CreateLimiter"]

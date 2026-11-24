@@ -1,0 +1,22 @@
+{
+  "name": "bq-bingo-fog-mode",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beta Quest bingo where the card starts hidden: you only see the squares your color has revealed.",
+  "license": "MIT",
+  "scripts": {
+    "fetch-generator": "node scripts/fetch_generator.js",
+    "start": "node fog_server.js",
+    "test": "node test_fog.js",
+    "check-public": "node scripts/check_public.js",
+    "build:cloudflare": "node cloudflare/build.js",
+    "dev:cloudflare": "node cloudflare/dev.js",
+    "deploy:cloudflare": "node cloudflare/build.js && wrangler deploy -c cloudflare/wrangler.toml"
+  },
+  "devDependencies": {
+    "wrangler": "4.157.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

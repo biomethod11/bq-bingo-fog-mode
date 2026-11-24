@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beta Quest Bingo Fog Mode</title>
+<style>
+:root {
+  --bg: #16181f; --panel: #1f222b; --panel2: #262a35; --ink: #e8eaf0; --dim: #8a90a0; --line: #343949;
+  --gold: #f0c450; --green: #6ed28c; --fog: #0d0f14;
+}
+* { box-sizing: border-box; }
+/* Keep room for the scrollbar so the board doesn't shift sideways when the page grows past the window. */
+html { scrollbar-gutter: stable; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 "Segoe UI", system-ui, sans-serif; }
+a { color: #7fb4ff; }
+main { max-width: 1120px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 4px 0 2px; color: var(--gold); letter-spacing: .5px; }
+.sub { color: var(--dim); margin: 0 0 14px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 0 0 10px; }
+button { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--dim); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #3b4a2a; border-color: #5f7a3c; }
+button.warn { background: #4a2a2a; border-color: #7a3c3c; }
+button.on { outline: 2px solid var(--gold); }
+button.link { background: none; border: none; color: #7fb4ff; padding: 0; text-decoration: underline; }
+input, select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+input[type=checkbox] { width: 17px; height: 17px; vertical-align: -3px; accent-color: var(--gold); }
+label { display: block; margin: 8px 0; }
+.field > span:first-child { display: inline-block; min-width: 170px; color: var(--dim); }
+.indent { margin-left: 26px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.topbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin-bottom: 10px; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--cb); color: var(--ct); border: 1px solid var(--cb); }
+.clock { font: 600 22px/1 Consolas, monospace; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch { width: 86px; padding: 6px 4px; border-radius: 6px; border: 2px solid var(--cb); background: var(--cb); color: var(--ct); text-align: center; cursor: pointer; font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.swatch small { display: block; font-weight: 400; color: var(--ct); opacity: .8; font-size: 11px; min-height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.swatch.sel { outline: 3px solid var(--gold); outline-offset: 1px; }
+.grid { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr); gap: 6px; }
+.grid.n6 .cell { font-size: 12.5px; padding: 4px; } .grid.n4 .cell { font-size: 15px; }
+@media (max-width: 600px) { .grid.n6 .cell { font-size: 10px; padding: 2px; } }
+.cell { position: relative; aspect-ratio: 1 / 0.82; border-radius: 6px; border: 2px solid var(--line); background: var(--panel2);
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 6px; font-size: 14px;
+  line-height: 1.2; user-select: none; overflow: hidden; word-break: break-word; }
+@media (max-width: 600px) { .cell { font-size: 11px; padding: 3px; } }
+.cell.fog { background: repeating-linear-gradient(45deg, var(--fog), var(--fog) 8px, #12151c 8px, #12151c 16px); color: #3a3f4d; border-color: #20232c; }
+.cell.fog:not(.claimed)::after { content: "?"; font-size: 26px; font-weight: 700; }
+.cell.claimed { background: var(--cb); border-color: var(--cb); color: var(--ct); }
+.cell.claimed .diff, .cell.claimed .who { color: var(--ct); opacity: .75; }
+.cell.claimed.free { background: repeating-linear-gradient(135deg, var(--cb), var(--cb) 9px, color-mix(in srgb, var(--cb) 78%, #000) 9px, color-mix(in srgb, var(--cb) 78%, #000) 18px); border-color: var(--ct); border-style: dashed; }
+.cell .tag { position: absolute; top: 3px; left: 5px; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #fff; background: rgba(0,0,0,.45); border-radius: 3px; padding: 0 4px; }
+.cell .who { position: absolute; bottom: 2px; right: 5px; font-size: 10px; color: rgba(255,255,255,.7); max-width: 90%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cell.claimable { cursor: pointer; }
+.cell.claimable:hover { border-color: var(--dim); }
+/* Eye cursor: clicking this fogged square spends a reveal (a Free Reveal after Choose FREE reveal, or an adjacent
+   reveal). Star cursor: clicking takes the square FREE. */
+.cell.revealable { cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'><path d='M2 15 C8 6 22 6 28 15 C22 24 8 24 2 15Z' fill='%23f0c450' stroke='%23000' stroke-width='1.6'/><circle cx='15' cy='15' r='5' fill='%23000'/><circle cx='13.3' cy='13.3' r='1.6' fill='%23fff'/></svg>") 15 15, crosshair; }
+.cell.revealable:hover { border-color: var(--gold); }
+.cell.revealable:hover::after { color: var(--gold); }
+.cell.claimable.freemode { cursor: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'><path d='M15 2l3.6 8.3 9 .8-6.8 5.9 2 8.8L15 21.2l-7.8 4.6 2-8.8-6.8-5.9 9-.8z' fill='%23f0c450' stroke='%23000' stroke-width='1.6'/></svg>") 15 15, copy; }
+.cell.claimable.freemode:hover { border-color: var(--gold); }
+/* Dark ring + gold ring so selection and wins show on every fill, including yellow and white. */
+.cell.sel { border-color: var(--gold); box-shadow: 0 0 0 2px #16181f inset, 0 0 0 4px var(--gold) inset; }
+.cell.win { box-shadow: 0 0 0 3px #16181f inset, 0 0 0 6px var(--gold) inset; }
+.cell.never { outline: 2px dashed #555b6b; outline-offset: -6px; }
+.cell .chest { position: absolute; top: 3px; right: 5px; font-size: 13px; color: var(--gold); }
+/* A claim whose reveals are still on the way: pulses, with the seconds left in the corner. */
+.cell.pending { animation: pending .9s ease-in-out infinite alternate; }
+@keyframes pending { from { opacity: 1; } to { opacity: .6; } }
+/* Lockout: a waiting claim flashes between your color and empty, because it isn't yours yet (someone who clicked
+   first can still snipe it). Once a second, well under the 3-flashes-a-second limit for flashing content. */
+.cell.flash { animation: flash 1s ease-in-out infinite; border-color: var(--cb); }
+.cell.flash .who { color: inherit; }
+@keyframes flash {
+  0%, 35%, 100% { background: var(--cb); color: var(--ct); }
+  50%, 85% { background: var(--panel2); color: var(--ink); }
+}
+.cell .wait { position: absolute; bottom: 2px; left: 5px; font: 700 11px/1.3 Consolas, monospace; color: #fff; background: rgba(0,0,0,.55); border-radius: 3px; padding: 0 4px; }
+.pendrow { display: flex; gap: 8px; align-items: center; margin: 4px 0; padding: 4px 6px; border-radius: 6px; background: var(--panel2); }
+.pendrow .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pendrow .countdown { font: 600 14px Consolas, monospace; color: var(--gold); }
+/* Spectators, Whole card: an edge in the colors that have revealed a square (split when several have), and squares
+   nobody has revealed yet are faded. The edge is a ring cut out of a filled box, so it can hold several colors. */
+.cell .ring { position: absolute; inset: 0; border-radius: 4px; padding: 3px; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; }
+.cell.unseen { opacity: .38; }
+/* Note symbols (right/ctrl/alt/shift-click): private, shared with your color (underlined in it), or shared with
+   everyone (drawn in the placer's color). */
+.cell .notes { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; white-space: nowrap; }
+.cell .notes .note { font-size: 18px; } .grid.n6 .cell .notes .note { font-size: 15px; }
+@media (max-width: 600px) { .cell .notes .note { font-size: 13px; } }
+.note { font-size: 20px; line-height: 1; font-weight: 700; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.note.silver { color: #d4d8e0; } .note.square { color: #f4f4f4; } .note.x { color: #f4f4f4; font-size: 18px; } .note.circle { color: #f4f4f4; }
+.notekeys { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
+.notekeys .note { font-size: 16px; }
+.cell.new { animation: reveal 1.4s ease-out; }
+@keyframes reveal { from { box-shadow: 0 0 0 4px var(--green) inset; background: #2c4a34; } to { box-shadow: none; } }
+.hint { color: var(--dim); font-size: 13px; margin: 6px 0 0; }
+.banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-weight: 600; }
+.banner.win { background: #3d3418; border: 1px solid var(--gold); color: var(--gold); }
+.banner.info { background: var(--panel2); border: 1px solid var(--line); }
+.banner.ask { background: #2d2440; border: 1px solid #7a5fc0; }
+.banner.err { background: #3a2022; border: 1px solid #7a3c3c; margin-top: 0; }
+.people { list-style: none; margin: 0; padding: 0; }
+.people li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); flex: none; }
+.tokens { font-size: 18px; letter-spacing: 3px; color: var(--gold); }
+.log { max-height: 280px; overflow-y: auto; font-size: 13px; margin: 0; padding: 0; list-style: none; }
+.log li { padding: 2px 0; border-bottom: 1px solid #262a35; }
+.log .t { color: var(--dim); font-family: Consolas, monospace; margin-right: 6px; }
+.ctext { color: var(--c); font-weight: 600; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.err { color: #ff8f8a; min-height: 1.2em; margin-top: 6px; }
+/* Spectator view picker: Whole card, then one button per color, filled with that color and named after its players.
+   The gold ring sits outside the button (with a gap) so it shows on every fill, yellow included. */
+.views { display: flex; flex-wrap: wrap; gap: 8px; }
+.views button { display: flex; flex-direction: column; align-items: flex-start; max-width: 100%; padding: 5px 10px; line-height: 1.25; text-align: left; }
+.views button.color { background: var(--cb); border-color: var(--cb); color: var(--ct); }
+.views button.color:hover:not(:disabled) { border-color: var(--ct); }
+.views button .nm { font-weight: 700; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.views button .fg { font-size: 11.5px; opacity: .85; }
+.views button.on { outline: 2px solid var(--gold); outline-offset: 2px; }
+button.help { font-weight: 600; }
+/* Password box: the characters are hidden; holding the eye shows them. */
+.pw { position: relative; display: inline-flex; align-items: center; vertical-align: middle; }
+.pw input { padding-right: 36px; }
+.pw .eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); padding: 4px 7px; line-height: 0; background: none; border: none;
+  color: var(--dim); touch-action: none; user-select: none; -webkit-user-select: none; }
+.pw .eye:hover:not(:disabled) { color: var(--ink); }
+.pw .eye.showing { color: var(--gold); }
+dialog.help { max-width: 680px; width: calc(100% - 32px); max-height: 85vh; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0; }
+dialog.help::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.help .head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+dialog.help .body { padding: 4px 16px 16px; }
+dialog.help .intro { margin: 14px 0 0; }
+dialog.help h3 { color: var(--gold); font-size: 15px; margin: 16px 0 6px; scroll-margin-top: 60px; }
+dialog.help ul { margin: 0; padding-left: 18px; } dialog.help li { margin: 3px 0; }
+details > summary { cursor: pointer; color: var(--dim); margin: 8px 0; }
+.problems { margin: 10px 0 0; font-size: 13px; } .problems:empty { display: none; }
+.line { margin-top: 8px; } .line .hint { margin: 0; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script src="/rules.js"></script>
+<script>
+// The whole client: one page with three screens, picked from the address (see "route" at the bottom).
+//   createPage()  the main page: create a room, join one by code, the streamer setting
+//   joinPage()    nickname, color (and the room password) for a room link
+//   roomPage()    the board, side panel and log; live updates arrive from the server as Server-Sent Events
+// The rules file (fog_logic.js) is loaded first as window.FogRules, so the page checks settings exactly like the
+// server does. Some names in the data differ from the page's (lens = Free Reveals, chests = Bonus Reveal Squares,
+// claimDelay = Claim undo timer...): the list is at the top of fog_logic.js.
+"use strict";
+const app = document.getElementById("app");
+const TITLE = "Beta Quest Bingo Fog Mode";
+const SOURCE_URL = "https://github.com/biomethod11/bq-bingo-fog-mode"; // shown on the main page and in Help
+const sourceLink = () => el("a", { href: SOURCE_URL, target: "_blank", rel: "noopener" }, "Source on GitHub");
+const NOTES = {
+  silver: { glyph: "★", label: "Right-click", name: "silver star" },
+  square: { glyph: "☐", label: "Ctrl+click", name: "square" },
+  x: { glyph: "✕", label: "Alt+click", name: "X" },
+  circle: { glyph: "○", label: "Shift+click", name: "circle" },
+};
+const SCOPES = { private: "Private (only you)", team: "Shared with my color", all: "Shared with everyone" };
+// Player colors: [accent for text on the dark page, square fill, text on that fill]. Chosen so every pair stays
+// clearly apart (CIEDE2000 >= 20 normal vision, >= 10 under protan/deutan/tritan simulation), every fill stands
+// out from an empty square, and all text meets WCAG 4.5:1. Navy was dropped (too close to blue and purple) for white.
+const PALETTE = {
+  red: ["#ff6e6e", "#c62828", "#fff"], orange: ["#ef6c00", "#ef6c00", "#000"], yellow: ["#fdd835", "#fdd835", "#000"],
+  green: ["#66bb6a", "#66bb6a", "#000"], teal: ["#4dd0e1", "#4dd0e1", "#000"], blue: ["#42a5f5", "#1e88e5", "#000"],
+  purple: ["#c77ddb", "#8e24aa", "#fff"], pink: ["#ff80ab", "#ff80ab", "#000"], brown: ["#b08f84", "#8d6e63", "#fff"],
+  white: ["#eceff1", "#eceff1", "#000"],
+};
+const LEGACY = { navy: ["#7986cb", "#3949ab", "#fff"] }; // still drawn for rooms made before navy was dropped
+const COLORS = Object.keys(PALETTE);
+const paletteOf = (c) => PALETTE[c] || LEGACY[c] || null;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const colorVars = (c) => { const p = c && paletteOf(c); return p ? `--c:${p[0]};--cb:${p[1]};--ct:${p[2]}` : "--c:#888;--cb:#333;--ct:#fff"; };
+// WCAG contrast, used to pick black or white text over several color bands.
+function luminance(hex) {
+  const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+}
+const contrastRatio = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function bestTextOver(fills) {
+  const worst = (t) => Math.min(...fills.map((f) => contrastRatio(f, t)));
+  return worst("#000000") >= worst("#ffffff") ? "#000" : "#fff";
+}
+let BOARD_N = 5; // set from the room's board size
+const pos = (i) => `r${Math.floor(i / BOARD_N) + 1}c${(i % BOARD_N) + 1}`;
+// Claim Mode, in words. onClaim: reveal4 | reveal8 | adj1/2/3 ("Choose") | free1/2/3.
+const ON_CLAIM_TEXT = {
+  reveal4: "Reveal 4 (up, down, left, right)", reveal8: "Reveal 8 (diagonals too)",
+  adj1: "Choose 1 (a square next to yours)", adj2: "Choose 2 (squares next to yours)", adj3: "Choose 3 (squares next to yours)",
+  free1: "Free 1 (any square)", free2: "Free 2 (any squares)", free3: "Free 3 (any squares)",
+};
+// Short name, also for rooms saved with values the page no longer offers (e.g. free6).
+function claimName(v) {
+  const m = /^(reveal|adj|free)(\d)$/.exec(v || "reveal4");
+  return m ? `${{ reveal: "Reveal", adj: "Choose", free: "Free" }[m[1]]} ${m[2]}` : "Reveal 4";
+}
+
+// Rooms made before Open became the only goal still name theirs.
+const GOAL_SHORT = { line: "Line", sprint: "Sprint (2x2)", corners: "Corners", open: "Open" };
+// One short line describing a room's settings, named as on the create page ("5x5 · Lockout · Claim undo timer: 5s ·
+// Claim Mode: Reveal 4 · Starting Free Squares: 1").
+function rulesSummary(c) {
+  const n = c.size || 5;
+  return [
+    `${n}x${n}`,
+    c.goal && c.goal !== "open" ? `Goal: ${GOAL_SHORT[c.goal] || c.goal}` : null,
+    c.lockout ? "Lockout" : "Non-lockout",
+    `Claim undo timer: ${c.claimDelay ? `${c.claimDelay}s` : "off"}`,
+    `Claim Mode: ${claimName(c.onClaim)}`,
+    c.sharedFog ? "Shared fog" : null,
+    c.free ? `Starting Free Squares: ${c.free}${c.freeReveals ? "" : " (no reveals)"}` : null,
+    c.lens ? `Starting Free Reveals: ${c.lens}` : null,
+    c.chests ? `Bonus Reveal Squares: ${c.chests}` : null,
+  ].filter(Boolean).join(" · ");
+}
+// "up to 3 players" for this room's board, lockout and fog (from simulated games), and the room's hard limit.
+const recommended = (c) => window.FogRules.recommendedPlayers(c);
+const roomLimit = (c) => window.FogRules.maxPlayers(c);
+function playersAdvice(c) {
+  const rec = recommended(c), max = roomLimit(c), n = c.size || 5;
+  const what = `${n}x${n} ${c.lockout ? "lockout" : "non-lockout"}${c.sharedFog ? " with shared fog" : ""}`;
+  return rec >= max ? `Recommended for ${what}: any number up to the room limit of ${max} players.`
+    : `Recommended for ${what}: up to ${rec} players (teammates on one color count as one). Room limit: ${max}.`;
+}
+
+// The Help window. Section ids are what helpButton(section) opens at. Items are static HTML.
+function playersHelp() {
+  const r = (size, lockout, sharedFog) => recommended({ size, lockout, sharedFog });
+  return `<b>Players</b>: recommended maximum (teammates on one color count as one): lockout ${r(4, true)} on 4x4, ${r(5, true)} on 5x5 and ${r(6, true)} on 6x6, `
+    + `or ${r(5, true, true)} with shared fog; non-lockout, up to the room limit (4x4 with shared fog: ${r(4, false, true)}). `
+    + `A lockout room takes at most ${roomLimit({ lockout: true })} players and a non-lockout room ${roomLimit({ lockout: false })}; spectators don't count. `
+    + `These numbers come from simulated games, so treat them as a starting point.`;
+}
+const HELP = [
+  ["settings", "Room settings", [
+    "<b>Board</b>: 5x5 is the exact BingoSync card for the card seed. 4x4 and 6x6 are built from the same goals and difficulty tiers, balanced so every line has about the same total difficulty.",
+    "<b>Claim Mode</b>: what happens when you claim a square."
+      + "<ul><li><b>Reveal 4/8</b>: the 4 or 8 squares around it are revealed (8 includes the diagonals).</li>"
+      + "<li><b>Choose 1/2/3</b>: you get 1, 2 or 3 adjacent reveals, each for a fogged square touching one of your squares (diagonals count).</li>"
+      + "<li><b>Free 1/2/3</b>: you get 1, 2 or 3 Free Reveals, each for any fogged square.</li></ul>",
+    "<b>Lockout</b>: one color per square. Off (non-lockout): colors can share squares, shown as split color bands.",
+    "<b>Claim undo timer</b> (lockout): on by default, 5 seconds (1-10). Until it runs out, only your color sees a new claim and you can take it back; if several players claim the same square, the first click gets it. Off: claims take effect at once. Rooms without lockout always use 5 seconds.",
+    "<b>Shared fog</b>: everyone sees every reveal.",
+    "<b>Starting Free Squares</b>: each color gets 1-3 Free Squares to claim without doing the goal (for groups that allow it for certain goals, such as all trial beams or boss kills). They show to everyone with diagonal stripes and a FREE tag.",
+    "<b>Free Square Reveals</b>: when on, a Free Square reveals squares like a normal claim.",
+    "<b>Starting Free Reveals</b>: each color starts with 1-3 Free Reveals.",
+    "<b>Bonus Reveal Squares</b>: 1-6 hidden squares, marked ◆ once revealed, that give +1 Free Reveal when claimed.",
+    "<b>Setting combinations that aren't allowed</b> (greyed out): shared fog with Choose 3 or Free 3; 4x4 with Reveal 8, Choose 3 or Free 3; 4x4 with shared fog and anything other than Choose 1 or Free 1.",
+    "<b>Room password</b> (optional): anything you like, even 1234. Everyone who joins or spectates has to enter it, so send it along with the link; players already in the room aren't asked again. Leave it empty for an open room.",
+    "<b>Filename</b>: the Beta Quest file everyone plays. The <b>card seed</b> picks the hidden card; it must differ from the filename, or players could look the card up. It's shown when the game ends.",
+  ]],
+  ["play", "Playing", [
+    "<b>Start</b>: each color starts with the center square and one random edge or corner square revealed (a different one for each color). 4x4 and 6x6 have no single center square, so you get the central square nearest your edge square.",
+    "<b>Claiming</b>: click a revealed square to claim it. Until the claim undo timer runs out, only your color sees the claim, and you can take it back by clicking the square again or pressing <b>Undo</b> next to the countdown. Then the claim is permanent and its reveals appear.",
+    "<b>Snipes</b> (lockout): if several players claim the same square before their timers run out, the first click gets it and the log shows who sniped whom. A sniped Free Square is given back. While your claim waits, the square flashes in your color: it isn't yours until the countdown ends.",
+    "<b>Undo after the timer</b>: click one of your own squares to ask to undo it; another color allows or denies the request. Anything you've seen stays seen.",
+    "<b>Choose FREE square</b>, then click a square (star cursor) to claim it as a Free Square.",
+    "<b>Choose FREE reveal</b>, then click any fogged square (eye cursor) to spend a Free Reveal on it. Clicking the fog without the button never spends one.",
+    "<b>Adjacent reveals</b> (Choose Claim Mode): click a fogged square touching one of yours (eye cursor).",
+    "<b>Boxed in</b> (nothing to claim and no reveal to spend): you get a bonus Free Reveal; use it with <b>Choose FREE reveal</b>. This happens every time you're boxed in.",
+    playersHelp(),
+  ]],
+  ["notes", "Note symbols", [
+    "<b>Right-click</b>: silver ★. <b>Ctrl+click</b>: ☐. <b>Alt+click</b>: ✕. <b>Shift+click</b>: ○. Each symbol toggles on its own, so a square can carry several; the same click again removes that one.",
+    "Symbols never claim anything, and they work on fogged squares too.",
+    "Each symbol is private, shared with your color, or shared with everyone, as the room was set up. Symbols shared with everyone are drawn in the color of whoever placed them; ones shared with your color are underlined in it. Hover over a symbol to see who placed it.",
+    "You can only remove your own color's symbols (a teammate on your color can remove yours). If another color has a symbol on a square, the same click adds yours next to it.",
+  ]],
+  ["see", "Who sees what", [
+    "You see the squares your color has revealed. Other colors' squares show only their color. Teammates (same color) share fog.",
+    "Nobody sees the card until every color presses Ready. A player who leaves before the start (page closed for 30 seconds) stops counting; if they aren't back when everyone else is ready, the game starts without them, and they can watch or join late.",
+    "Spectators see the whole card once the game starts. On the <b>Whole card</b>, a colored edge shows which colors have revealed each square (split between colors when several have), and squares nobody has revealed yet are faded. Each player's button (in their color, with their name) shows only what that player's color sees.",
+    "When the game ends, the card is revealed to everyone. Dashed outlines mark squares you never saw.",
+  ]],
+  ["win", "Winning", [
+    "Players decide the win condition (a line, most squares, blackout...).",
+    "Any player can end the game, early or not, with <b>End the game</b> (you're asked to confirm). Everyone then sees the whole card and each color's square count.",
+  ]],
+];
+function openHelp(section) {
+  let dlg = document.getElementById("help");
+  if (!dlg) {
+    dlg = el("dialog", { class: "help", id: "help" },
+      el("div", { class: "head" }, el("b", {}, "Beta Quest Bingo Fog Mode help"), el("button", { onclick: () => dlg.close() }, "Close")),
+      el("div", { class: "body" },
+        el("p", { class: "intro" }, "Beta Quest Bingo Fog Mode is Beta Quest bingo where the card starts hidden: you only see the squares your color has revealed, and every claim reveals more."),
+        HELP.map(([id, title, items]) => {
+          const list = el("ul");
+          for (const html of items) { const li = document.createElement("li"); li.innerHTML = html; list.append(li); } // static text only
+          return [el("h3", { id: `help-${id}` }, title), list];
+        }),
+        el("p", { class: "hint", style: "margin-top:16px" }, sourceLink())));
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    document.body.append(dlg);
+  }
+  dlg.showModal();
+  // The first section opens at the very top, so the intro above it shows too.
+  const target = section && section !== HELP[0][0] && document.getElementById(`help-${section}`);
+  if (target) target.scrollIntoView({ block: "start" }); else dlg.scrollTop = dlg.querySelector(".body").scrollTop = 0;
+}
+const helpButton = (section) => el("button", { class: "help", title: "Help", onclick: () => openHelp(section) }, "? Help");
+
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "checked" || k === "value") e[k] = v;
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : String(kid));
+  return e;
+};
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+// Streamer mode (a per-browser preference): the room code is hidden on the page and kept out of the address bar
+// (the page moves to /play); Copy room link still copies the real link.
+const streamer = {
+  on: () => store.get("fog-streamer") === "1",
+  set: (v) => store.set("fog-streamer", v ? "1" : "0"),
+};
+const shownCode = (id) => (streamer.on() ? "••••••" : id);
+// Keep the address bar in step with streamer mode. The tab remembers its room, so /play survives a refresh.
+function placeUrl(roomId) {
+  try { sessionStorage.setItem("fog-current", roomId); } catch {}
+  const want = streamer.on() ? "/play" : `/r/${roomId}`;
+  if (location.pathname !== want) history.replaceState(null, "", want);
+}
+// The create form always starts fresh (default settings, no nickname or color), from New room or a reload. Older
+// versions remembered the last entries in these keys; clear them.
+for (const k of ["fog-settings", "fog-name", "fog-color"]) store.del(k);
+function newRoomButton(label = "New room") {
+  return el("button", { title: "Make a new room", onclick: () => { location.href = "/"; } }, label);
+}
+
+// The room session lives per tab (sessionStorage): a refresh keeps you in, a new tab can join as someone else.
+const session = {
+  get(room) { try { return sessionStorage.getItem(`fog-room-${room}`); } catch { return null; } },
+  set(room, v) { try { sessionStorage.setItem(`fog-room-${room}`, v); } catch {} },
+  del(room) { try { sessionStorage.removeItem(`fog-room-${room}`); } catch {} },
+};
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) { const e = new Error(data.error || `HTTP ${res.status}`); e.status = res.status; throw e; }
+  return data;
+}
+
+// A password box: what you type is hidden; press and hold the eye to see it (it hides again when you let go).
+// Works with a mouse, touch, and the keyboard (hold Space or Enter on the eye).
+const EYE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+function passwordBox(attrs) {
+  const input = el("input", { ...attrs, type: "password" });
+  const show = (on) => { input.type = on ? "text" : "password"; eye.classList.toggle("showing", on); };
+  const eye = el("button", {
+    type: "button", class: "eye", title: "Hold to show the password", "aria-label": "Hold to show the password",
+    onpointerdown: (e) => { e.preventDefault(); show(true); }, // preventDefault keeps the cursor in the box
+    onpointerup: () => show(false), onpointerleave: () => show(false), onpointercancel: () => show(false),
+    onkeydown: (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); show(true); } },
+    onkeyup: () => show(false), onblur: () => show(false),
+    oncontextmenu: (e) => e.preventDefault(), // a long press on a phone shouldn't open a menu
+  });
+  eye.innerHTML = EYE_SVG;
+  return { input, node: el("span", { class: "pw" }, input, eye) };
+}
+
+// A setting that is either off or a number (Starting Free Squares, Claim undo timer...): a checkbox, plus a number
+// box (and unit) that only shows while it's ticked. value() is the number, kept within min-max, or 0 when off.
+function countSetting(label, { min, max, value, checked = false, unit = "", indent = false }) {
+  const on = el("input", { type: "checkbox", checked });
+  const n = el("input", { type: "number", min, max, step: 1, value, style: "width:56px" });
+  const extra = el("span", {}, " ", n, unit ? ` ${unit}` : "");
+  const sync = () => { extra.hidden = !on.checked; };
+  on.addEventListener("change", sync);
+  sync();
+  return {
+    on,
+    row: el("label", { class: indent ? "indent" : "" }, on, ` ${label}`, extra),
+    value: () => (on.checked ? Math.min(max, Math.max(min, Math.round(Number(n.value)) || min)) : 0),
+  };
+}
+
+// Nickname + color picker, shared by the create page and the join page. Nothing is remembered between visits:
+// it starts empty on the first color nobody has (taken: color -> names), or from `current` when you change your
+// name or color in a room.
+function identityFields(taken = {}, current = null) {
+  let color = current && PALETTE[current.color] ? current.color : COLORS.find((c) => !taken[c]) || COLORS[0];
+  const name = el("input", { maxlength: 20, placeholder: "e.g. Jim", value: current ? current.name : "", style: "width:200px" });
+  const sw = el("div", { class: "swatches" });
+  const draw = () => sw.replaceChildren(...COLORS.map((c) => el("div", {
+    class: "swatch" + (c === color ? " sel" : ""), style: colorVars(c), role: "button", tabindex: 0, "data-color": c,
+    onclick: () => { color = c; draw(); },
+  }, c, el("small", {}, taken[c] ? taken[c].join(", ") : ""))));
+  draw();
+  return {
+    nodes: [el("label", { class: "field" }, el("span", {}, "Nickname"), name), el("div", { class: "field" }, el("span", { style: "display:block;margin-bottom:6px" }, "Color"), sw)],
+    value: () => ({ name: name.value.trim(), color }),
+  };
+}
+
+// ---------------------------------------------------------------------------------------- main page
+function createPage() {
+  const err = el("div", { class: "err" });
+  const id = identityFields();
+  // The settings always start from the defaults: nothing carries over from the last room.
+  const rules = window.FogRules || {};
+  const size = el("select", {}, el("option", { value: 5 }, "5x5 (BingoSync card)"), el("option", { value: 4 }, "4x4"), el("option", { value: 6 }, "6x6"));
+  const onClaim = el("select", {}, Object.entries(ON_CLAIM_TEXT).map(([v, t]) => el("option", { value: v }, t)));
+  const lockout = el("input", { type: "checkbox", checked: true });
+  const undoTimer = countSetting("Claim undo timer", { min: 1, max: rules.MAX_CLAIM_DELAY || 10, value: rules.CLAIM_DELAY || 5, checked: true, unit: "seconds", indent: true });
+  const shared = el("input", { type: "checkbox", checked: false });
+  const freeSquares = countSetting("Starting Free Squares", { min: 1, max: 3, value: 1 });
+  const freeSquareReveals = el("input", { type: "checkbox", checked: true });
+  const freeSquareRevealsRow = el("label", { class: "indent" }, freeSquareReveals, " Free Square Reveals");
+  const freeReveals = countSetting("Starting Free Reveals", { min: 1, max: 3, value: 2 });
+  const bonusSquares = countSetting("Bonus Reveal Squares", { min: 1, max: 6, value: 2 });
+  const noteSel = Object.fromEntries(Object.keys(NOTES).map((k) => [k, el("select", {}, Object.entries(SCOPES).map(([v, t]) => el("option", { value: v }, t)))]));
+  const fname = el("input", { placeholder: "random", maxlength: 8, style: "width:120px" });
+  const card = el("input", { placeholder: "random, secret", maxlength: 6, style: "width:120px" });
+  const pwBox = passwordBox({ maxlength: 64, placeholder: "optional", autocomplete: "new-password", style: "width:170px" });
+  const hideCode = el("input", { type: "checkbox", checked: streamer.on() });
+  const problemsBox = el("p", { class: "problems" });
+
+  // Rows that only apply while another setting is on: the undo timer is a lockout setting, and Free Square Reveals
+  // needs Free Squares.
+  const syncRows = () => { undoTimer.row.hidden = !lockout.checked; freeSquareRevealsRow.hidden = !freeSquares.on.checked; };
+  lockout.addEventListener("change", syncRows);
+  freeSquares.on.addEventListener("change", syncRows);
+  syncRows();
+
+  // The room's settings as the server takes them (normalizeConfig in fog_logic.js lists the names). Without
+  // lockout, claimDelay is left out and the room gets the default timer.
+  const settings = () => ({
+    size: size.value, onClaim: onClaim.value, lockout: lockout.checked, sharedFog: shared.checked,
+    claimDelay: lockout.checked ? undoTimer.value() : undefined,
+    free: freeSquares.value(), freeReveals: freeSquareReveals.checked, lens: freeReveals.value(), chests: bonusSquares.value(),
+    noteShare: Object.fromEntries(Object.entries(noteSel).map(([k, sel]) => [k, sel.value])),
+  });
+
+  // Grey out choices that don't work with the rest (the same check the server makes) and say why.
+  function checkSettings() {
+    let problems = [];
+    if (rules.configProblems) {
+      for (const sel of [size, onClaim])
+        for (const opt of sel.options) opt.disabled = opt.value !== sel.value && rules.configProblems({ ...settings(), [sel === size ? "size" : "onClaim"]: opt.value }).length > 0;
+      problems = rules.configProblems(settings());
+    }
+    go.disabled = problems.length > 0;
+    problemsBox.replaceChildren(...problems.map((w) => el("span", { class: "err", style: "display:block;margin:4px 0 0" }, "✕ " + w)));
+  }
+
+  const go = el("button", { class: "primary", onclick: async () => {
+    err.textContent = "";
+    const me = id.value();
+    if (!me.name) { err.textContent = "Pick a nickname."; return; }
+    go.disabled = true;
+    try {
+      const res = await api("/api/rooms", { name: me.name, color: me.color, ...settings(), filenameSeed: fname.value.trim(), cardSeed: card.value.trim(), password: pwBox.input.value });
+      session.set(res.id, res.token);
+      if (streamer.on()) { placeUrl(res.id); roomPage(res.id, res.token); } else location.href = `/r/${res.id}`;
+    } catch (e) { err.textContent = e.message; go.disabled = false; }
+  } }, "Create room");
+
+  const code = el("input", { placeholder: "room code", maxlength: 6, style: "width:120px", type: streamer.on() ? "password" : "text" });
+  hideCode.addEventListener("change", () => { streamer.set(hideCode.checked); code.type = hideCode.checked ? "password" : "text"; });
+  const joinGo = () => {
+    const c = code.value.trim().toLowerCase();
+    if (!/^[a-z0-9]{6}$/.test(c)) return;
+    if (streamer.on()) { placeUrl(c); const t = session.get(c); if (t) roomPage(c, t); else joinPage(c); } else location.href = `/r/${c}`;
+  };
+  code.addEventListener("keydown", (e) => { if (e.key === "Enter") joinGo(); });
+  const field = (label, ...input) => el("label", { class: "field" }, el("span", {}, label), ...input);
+
+  const createPanel = el("div", { class: "panel" },
+    el("h2", {}, "Create a room"),
+    ...id.nodes,
+    field("Board", size),
+    field("Claim Mode", onClaim),
+    el("label", {}, lockout, " Lockout"),
+    undoTimer.row,
+    el("label", {}, shared, " Shared fog"),
+    freeSquares.row,
+    freeSquareRevealsRow,
+    freeReveals.row,
+    bonusSquares.row,
+    field("Room password", pwBox.node),
+    el("details", {}, el("summary", {}, "Note symbols"),
+      el("div", { class: "indent" }, Object.entries(NOTES).map(([k, n]) => field([el("span", { class: "note " + k, style: "font-size:15px;margin-right:6px" }, n.glyph), n.label], noteSel[k])))),
+    el("details", {}, el("summary", {}, "Filename and card seed"),
+      el("div", { class: "indent" }, field("Beta Quest filename", fname), field("Card seed", card))),
+    problemsBox,
+    el("div", { class: "row", style: "margin-top:10px" }, go), err);
+  createPanel.addEventListener("change", checkSettings); // any setting change re-checks the combination
+  checkSettings();
+
+  app.replaceChildren(
+    el("div", { class: "topbar" }, el("h1", {}, TITLE), helpButton("settings")),
+    el("div", { class: "two" },
+      createPanel,
+      el("div", {},
+        el("div", { class: "panel" },
+          el("h2", {}, "Join a room"),
+          el("div", { class: "row" }, code, el("button", { onclick: joinGo }, "Go"))),
+        el("div", { class: "panel" },
+          el("h2", {}, "Streaming"),
+          el("label", { style: "margin:0" }, hideCode, " Hide the room code"),
+          el("p", { class: "hint" }, "Keeps the code off this page and out of the address bar. Copy room link still copies the real link. Saved in this browser.")),
+        el("p", { class: "hint", style: "text-align:right" }, sourceLink()))));
+}
+
+// ---------------------------------------------------------------------------------------- join page
+// current: your name and color when you come here from Change name or color (the form starts from them).
+async function joinPage(roomId, note, current = null) {
+  let info;
+  try { info = await api(`/api/rooms/${roomId}/info`); }
+  catch (e) { app.replaceChildren(el("h1", {}, TITLE), el("p", { class: "err" }, e.message), el("a", { href: "/" }, "Back to the main page")); return; }
+  placeUrl(roomId);
+  const taken = {};
+  for (const p of info.players) if (p.color) (taken[p.color] = taken[p.color] || []).push(p.name);
+  const id = identityFields(taken, current);
+  const err = el("div", { class: "err" }, note || "");
+  const playing = info.players.filter((p) => p.color).length, max = roomLimit(info.config);
+  // A password-protected room asks for it, unless this tab is already in the room (changing name or color).
+  const pwBox = info.password && !session.get(roomId)
+    ? passwordBox({ maxlength: 64, autocomplete: "off", style: "width:200px", onkeydown: (e) => { if (e.key === "Enter") join(false); } })
+    : null;
+  const pw = pwBox ? pwBox.input : null;
+  const join = async (spectate) => {
+    const me = id.value();
+    if (!me.name) { err.textContent = "Pick a nickname."; return; }
+    if (pw && !pw.value.trim()) { err.textContent = "This room needs a password."; pw.focus(); return; }
+    try {
+      const res = await api(`/api/rooms/${roomId}/join`, { name: me.name, color: spectate ? "spectator" : me.color, token: session.get(roomId) || undefined, password: pw ? pw.value : undefined });
+      session.set(roomId, res.token);
+      roomPage(roomId, res.token);
+    } catch (e) { err.textContent = e.message; if (pw && (e.status === 403 || e.status === 429)) { pw.focus(); pw.select(); } }
+  };
+  app.replaceChildren(
+    el("div", { class: "topbar" }, el("h1", {}, TITLE), helpButton("see")),
+    el("p", { class: "sub" }, `Room ${shownCode(info.id)} · Filename: ${info.filenameSeed} · ${rulesSummary(info.config)}`),
+    el("div", { class: "panel", style: "max-width:640px" },
+      el("h2", {}, info.started ? "Join (game in progress)" : "Join the room"),
+      ...id.nodes,
+      pwBox ? el("label", { class: "field" }, el("span", {}, "Room password"), pwBox.node) : null,
+      el("p", { class: "hint" }, `Players on the same color are a team. Players: ${playing}/${max}. ${playersAdvice(info.config)}`),
+      playing >= max ? el("p", { class: "hint", style: "color:var(--gold)" }, "This room is full. You can still spectate, or take your old place back with your old nickname and color.") : null,
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "primary", onclick: () => join(false) }, "Join"), el("button", { onclick: () => join(true) }, "Spectate")),
+      err));
+}
+
+// ---------------------------------------------------------------------------------------- room page
+let activeRoom = null;
+function roomPage(roomId, token) {
+  if (activeRoom) activeRoom.close();
+  placeUrl(roomId);
+  // freeMode: the next claim takes the square FREE. revealMode: the next click on the fog spends a Free Reveal.
+  let state = null, offset = 0, selected = null, freeMode = false, revealMode = false, viewAs = "all";
+  // Private symbols live only in this browser (never sent to the server). Symbols the room shares go to the server,
+  // which shows them to your color or to everyone. Spectators keep every symbol private.
+  const notesKey = `fog-notes-${roomId}`;
+  let notes = {};
+  try { notes = JSON.parse(store.get(notesKey) || "{}") || {}; } catch { notes = {}; }
+  const scopeOf = (kind) => (state && state.you.color && state.config.noteShare ? state.config.noteShare[kind] : "private");
+  // Each symbol toggles on its own, so a square can carry several. Private notes: cell -> list of kinds (notes saved
+  // before this held a single kind as a string, and the square was a red star).
+  const privateKinds = (i) => (Array.isArray(notes[i]) ? notes[i] : notes[i] ? [notes[i]] : []).map((k) => (k === "redstar" ? "square" : k));
+  function toggleNote(i, kind) {
+    if (scopeOf(kind) !== "private") { act({ type: "note", cell: i, kind }); return; }
+    const kinds = privateKinds(i);
+    const next = kinds.includes(kind) ? kinds.filter((k) => k !== kind) : kinds.concat(kind);
+    if (next.length) notes[i] = next; else delete notes[i];
+    store.set(notesKey, JSON.stringify(notes));
+    render();
+  }
+  // Every symbol on a square, in a fixed order: private ones, your color's shared ones, ones shared with everyone.
+  function symbolsFor(c) {
+    const s = state, out = [];
+    const order = Object.keys(NOTES);
+    // Shared with your color: underlined in it. Shared with everyone: the symbol itself is in the placer's color.
+    const add = (kind, title, color, everyone) => {
+      if (!NOTES[kind]) return;
+      const p = color && paletteOf(color);
+      const style = !p ? "" : everyone ? `color:${p[0]}` : `border-bottom:2px solid ${p[0]}`;
+      out.push(el("span", { class: "note " + kind, title, style }, NOTES[kind].glyph));
+    };
+    const shared = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+    for (const k of privateKinds(c.i).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))) add(k, `Your ${NOTES[k] ? NOTES[k].name : ""} (only you see it)`);
+    const sn = s.notes || { all: {}, team: {} };
+    const team = s.you.color ? sn.team : viewAs !== "all" && sn.byColor ? sn.byColor[viewAs] || {} : {};
+    for (const t of shared(team[c.i])) add(t.kind, `${cap(NOTES[t.kind].name)} by ${t.by || cap(t.color)} (shared with ${cap(t.color)})`, t.color);
+    for (const a of shared(sn.all[c.i])) add(a.kind, `${cap(NOTES[a.kind].name)} by ${a.by || cap(a.color)} (${cap(a.color)}, shared with everyone)`, a.color, true);
+    return out.length ? el("span", { class: "notes" }, out) : null;
+  }
+  function noteFor(e) {
+    if (e.type === "contextmenu") return e.ctrlKey ? "square" : "silver"; // Mac Ctrl+click arrives as a right-click
+    if (e.ctrlKey || e.metaKey) return "square";
+    if (e.altKey) return "x";
+    if (e.shiftKey) return "circle";
+    return null;
+  }
+  let prevSeen = null, newlySeen = new Set(), errMsg = "";
+  const es = new EventSource(`/api/rooms/${roomId}/events?t=${encodeURIComponent(token)}`);
+  activeRoom = es;
+  es.addEventListener("state", (ev) => {
+    const s = JSON.parse(ev.data);
+    BOARD_N = s.config.size || 5;
+    offset = s.now - Date.now();
+    const color = s.you.color;
+    if (color && s.started) {
+      const seen = new Set(s.cells.filter((c) => c.seen).map((c) => c.i));
+      if (prevSeen) newlySeen = new Set([...seen].filter((i) => !prevSeen.has(i)));
+      prevSeen = seen;
+    }
+    if (selected !== null && !s.cells[selected].marks.some((m) => m.color === color)) selected = null;
+    state = s;
+    errMsg = errMsg.startsWith("Connection") ? "" : errMsg;
+    render();
+    newlySeen = new Set();
+  });
+  es.onerror = async () => {
+    try { await api(`/api/rooms/${roomId}/state?t=${encodeURIComponent(token)}`); }
+    catch (e) { if (e.status === 403 || e.status === 404) { es.close(); session.del(roomId); joinPage(roomId, e.status === 404 ? "" : "Please join again."); return; } }
+    errMsg = "Connection lost, retrying..."; if (state) render();
+  };
+
+  async function act(body) {
+    errMsg = "";
+    try { await api(`/api/rooms/${roomId}/action?t=${encodeURIComponent(token)}`, body); }
+    catch (e) { errMsg = e.message; render(); }
+  }
+
+  const fmt = (ms) => {
+    if (ms < 0) ms = 0;
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0");
+  };
+  // Seconds until a waiting claim's reveals land (server time).
+  const secsLeft = (until) => Math.max(0, Math.ceil((until - (Date.now() + offset)) / 1000));
+  setInterval(() => {
+    const c = document.getElementById("clock");
+    if (c && state && state.started) c.textContent = fmt((state.ended ? state.ended.at : Date.now() + offset) - state.started);
+    for (const e of document.querySelectorAll("[data-until]")) e.textContent = `${secsLeft(Number(e.dataset.until))}s`;
+  }, 250);
+
+  function cellView(c) {
+    const s = state, me = s.you.color, player = !!me;
+    const winCells = new Set(s.ended ? s.ended.cells : []);
+    let fogged = player ? !c.seen : false;
+    if (!player && viewAs !== "all" && s.seenBy && s.seenBy[viewAs]) fogged = !s.seenBy[viewAs].includes(c.i);
+    if (!s.started && !s.ended) fogged = true;
+    if (s.ended) fogged = false;
+    const marks = c.marks;
+    const mine = myMark(c);
+    const cls = ["cell"];
+    if (fogged) cls.push("fog");
+    if (marks.length) cls.push("claimed");
+    if (marks.length === 1 && marks[0].free) cls.push("free");
+    if (s.ended && player && !c.seen) cls.push("never");
+    const live = player && s.started && !s.ended;
+    const who = marks.map((m) => `${m.by || cap(m.color)}${m.free ? " (free)" : ""}`).join(" / ");
+    let tip = pos(c.i) + (who ? ` · ${who}` : "");
+    const waiting = marks.filter((m) => m.pending);
+    const flash = waiting.length && !s.ended && s.config.lockout;
+    if (waiting.length && !s.ended) cls.push(flash ? "flash" : "pending");
+    if (live && c.seen && canTake(c)) {
+      cls.push("claimable");
+      if (freeMode) { cls.push("freemode"); tip = "Click to claim this square as a Free Square"; } else tip = "Click to claim";
+    }
+    if (live && mine) {
+      cls.push("claimable");
+      tip = !mine.pending ? "Click to ask for an undo"
+        : (flash ? "Not yours yet: someone who clicked first can still snipe it. " : "")
+          + "Only your color sees this claim until it takes effect. Click again (or press Undo) to take it back";
+    }
+    const how = live && !c.seen ? revealKind(c) : null;
+    if (how) { cls.push("revealable"); tip = how === "adj" ? "Click to use an adjacent reveal on this square" : "Click to use a Free Reveal on this square"; }
+    if (selected === c.i && live) cls.push("sel");
+    if (winCells.has(c.i)) cls.push("win");
+    if (newlySeen.has(c.i)) cls.push("new");
+    // One color: its fill. Several colors (non-lockout): BingoSync-style bands, one per color.
+    let style = colorVars(marks.length ? (mine ? me : marks[0].color) : null);
+    if (marks.length > 1) {
+      const w = 100 / marks.length;
+      const fills = marks.map((m) => (paletteOf(m.color) || ["", "#333333"])[1]);
+      const bands = fills.map((f, k) => `${f} ${k * w}% ${(k + 1) * w}%`).join(", ");
+      const text = bestTextOver(fills);
+      style += `;background:linear-gradient(135deg, ${bands});--ct:${text};text-shadow:0 0 3px ${text === "#000" ? "#fff" : "#000"}`;
+    }
+    // The board is redrawn on every update; start the flash where it left off so it doesn't stutter.
+    if (flash) style += `;animation-delay:-${(((Date.now() + offset - Math.min(...waiting.map((m) => m.until))) % 1000) + 1000) % 1000}ms`;
+    // Spectators on the Whole card: which colors have revealed this square (an edge in their colors; with shared fog
+    // they all see the same, so no edge), and a faded square if nobody has yet.
+    const seenCols = !player && viewAs === "all" && s.seenBy && (s.started || s.ended)
+      ? s.colors.filter((col) => (s.seenBy[col] || []).includes(c.i)) : null;
+    const ring = seenCols && seenCols.length && !s.config.sharedFog;
+    if (seenCols && !seenCols.length) { cls.push("unseen"); tip += " · nobody has revealed this yet"; }
+    if (ring) tip += ` · revealed by ${seenCols.map((col) => `${namesOn(col)} (${cap(col)})`).join(", ")}`;
+    const freeMarks = marks.filter((m) => m.free);
+    const node = el("div", { class: cls.join(" "), style, "data-cell": c.i, title: tip },
+      ring ? el("span", { class: "ring", style: `background:${ringFill(seenCols)}` }) : null,
+      !fogged && c.name ? c.name : "",
+      freeMarks.length ? el("span", { class: "tag" }, "FREE", marks.length > 1 ? freeMarks.map((m) => el("span", { class: "dot", style: colorVars(m.color) + ";display:inline-block;width:8px;height:8px;margin-left:3px" })) : null) : null,
+      marks.length && !fogged ? el("span", { class: "who" }, marks.map((m) => m.by || cap(m.color)).join(" / ")) : null,
+      c.chest && !fogged ? el("span", { class: "chest", title: "Bonus Reveal Square: claim it for +1 Free Reveal" }, "◆") : null,
+      waiting.length && !s.ended ? el("span", { class: "wait", "data-until": Math.min(...waiting.map((m) => m.until)), title: "Takes effect when this reaches 0" }, `${secsLeft(Math.min(...waiting.map((m) => m.until)))}s`) : null,
+      symbolsFor(c));
+    node.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleNote(c.i, noteFor(e)); });
+    node.addEventListener("click", (e) => {
+      const kind = noteFor(e);
+      if (kind) { e.preventDefault(); toggleNote(c.i, kind); return; }
+      if (live) onCell(c);
+    });
+    return node;
+  }
+
+  // A Free Reveal is available if you have one left, or for free when your color has nothing it can claim.
+  // Which reveal a click on this fogged square would spend: a Free Reveal (or the bonus one when you're boxed in)
+  // only after Choose FREE reveal, so a stray click on the fog never spends one; otherwise an adjacent reveal
+  // (Choose claim mode) if the square touches one of yours.
+  function revealKind(c) {
+    const s = state, me = s.you.color;
+    if (revealMode && canReveal()) return "lens";
+    if ((s.adj[me] || 0) > 0 && (s.adjTargets || []).includes(c.i)) return "adj";
+    return null;
+  }
+  function canReveal() {
+    const s = state;
+    return (s.lens[s.you.color] || 0) > 0 || s.stuck;
+  }
+
+  const myMark = (c) => (state.you.color ? c.marks.find((m) => m.color === state.you.color) || null : null);
+  // Lockout: only an unmarked square. Non-lockout: any square your color hasn't marked yet.
+  const canTake = (c) => (state.config.lockout ? c.marks.length === 0 : !myMark(c));
+
+  // One click does it:
+  //   a fogged square: revealed, if you have a reveal for it (see revealKind);
+  //   a square you can take: claimed (as a Free Square if Choose FREE square is on);
+  //   your own claim, while its timer runs: taken back, like Undo;
+  //   your own claim, after that: selected, which offers "Ask to undo this claim" in the side panel.
+  // A double-click on a new claim would otherwise take it straight back, so a second click on it within
+  // DOUBLE_CLICK_MS of claiming is ignored.
+  const DOUBLE_CLICK_MS = 400;
+  let lastClaim = { cell: null, at: 0 };
+  function onCell(c) {
+    if (!c.seen) {
+      const how = revealKind(c);
+      if (how) { selected = null; if (how === "lens") revealMode = false; act({ type: how, cell: c.i }); }
+      return;
+    }
+    const mine = myMark(c);
+    if (mine && mine.pending) {
+      if (lastClaim.cell === c.i && Date.now() - lastClaim.at < DOUBLE_CLICK_MS) return;
+      selected = null;
+      act({ type: "cancel", cell: c.i });
+      return;
+    }
+    if (mine) { selected = selected === c.i ? null : c.i; render(); return; }
+    if (canTake(c)) {
+      const free = freeMode;
+      freeMode = false; revealMode = false; selected = null;
+      lastClaim = { cell: c.i, at: Date.now() };
+      act({ type: "claim", cell: c.i, free });
+    }
+  }
+
+  function people() {
+    const s = state;
+    const rows = s.players.slice().sort((a, b) => (a.color ? s.colors.indexOf(a.color) : 99) - (b.color ? s.colors.indexOf(b.color) : 99));
+    const playing = s.players.filter((p) => p.color).length;
+    return el("div", { class: "panel" }, el("h2", {}, `In the room · ${playing}/${roomLimit(s.config)} players`),
+      el("ul", { class: "people" }, rows.map((p) => el("li", { style: colorVars(p.color) },
+        p.color ? el("span", { class: "dot" }) : el("span", { class: "dot", style: "background:#666" }),
+        el("span", {}, p.name), el("span", { class: "hint", style: "margin:0" },
+          p.color ? `${cap(p.color)}${!s.started ? (p.away ? " · left (doesn't count for Ready)" : s.ready[p.color] ? " · ready" : " · not ready") : ` · ${s.counts[p.color]} sq`}` : `spectating${p.away ? " · left" : ""}`)))),
+      el("p", { class: "hint" }, el("button", { class: "link", onclick: () => { es.close(); joinPage(roomId, "", s.me); } }, "Change name or color")));
+  }
+
+  function sidePlayer() {
+    const s = state, me = s.you.color, kids = [];
+    if (!s.started) {
+      const ready = !!s.ready[me];
+      kids.push(el("div", { class: "panel" }, el("h2", {}, "Before the start"),
+        el("p", { style: "margin-top:0" }, "Load Beta Quest file ", el("b", {}, s.filenameSeed), ". The card appears when every color is ready."),
+        el("button", { class: ready ? "warn" : "primary", onclick: () => act({ type: "ready", ready: !ready }) }, ready ? "Not ready" : "Ready")));
+    } else if (!s.ended) {
+      const sel = selected === null ? null : s.cells[selected];
+      const freeLeft = s.freeLeft[me] || 0;
+      const timer = s.config.claimDelay || 0;
+      const p = el("div", { class: "panel" },
+        el("p", { class: "hint", style: "margin:0 0 6px" }, timer
+          ? `Click to claim a revealed square. You will have ${timer} second${timer > 1 ? "s" : ""} to undo before it takes effect (click it again or press Undo).`
+          : "Click to claim a revealed square."));
+      const add = (...kids) => kids.forEach((k) => { if (k != null && k !== false) p.append(k); });
+      if (freeLeft <= 0) freeMode = false;
+      // Your color's claims whose timer is still running: a countdown and Undo for each.
+      const waiting = s.cells.filter((c) => (myMark(c) || {}).pending).sort((a, b) => myMark(a).until - myMark(b).until);
+      for (const c of waiting) {
+        const m = myMark(c);
+        add(el("div", { class: "pendrow" },
+          el("span", { class: "what", title: c.name || pos(c.i) }, c.name || pos(c.i), m.free ? " (free)" : ""),
+          el("span", { class: "countdown", "data-until": m.until, title: "Takes effect when this reaches 0" }, `${secsLeft(m.until)}s`),
+          el("button", { class: "warn", onclick: () => { selected = null; act({ type: "cancel", cell: c.i }); } }, "Undo")));
+      }
+      if (sel && myMark(sel) && !myMark(sel).pending) {
+        add(el("p", { style: "margin:6px 0" }, el("b", {}, sel.name), myMark(sel).free ? " (free)" : ""),
+          el("div", { class: "row" },
+            el("button", { class: "warn", onclick: () => { selected = null; act({ type: "undo", cell: sel.i }); } }, s.colors.length > 1 ? "Ask to undo this claim" : "Undo this claim"),
+            el("button", { onclick: () => { selected = null; render(); } }, "Cancel")));
+      }
+      if (s.config.free) {
+        add(el("div", { class: "line" }, "Free Squares: ", el("b", {}, String(freeLeft))),
+          el("div", { class: "row", style: "margin-top:6px" },
+            el("button", { class: freeMode ? "on" : "", disabled: freeLeft <= 0, onclick: () => { freeMode = !freeMode; revealMode = false; render(); } },
+              freeMode ? "Next click is a FREE square (cancel)" : "Choose FREE square")));
+      }
+      const myReveals = s.lens[me] || 0, myAdj = s.adj[me] || 0;
+      const kind = (s.config.onClaim || "").replace(/\d/g, "");
+      const tokens = (n) => (n > 8 ? `◉ ×${n}` : "◉".repeat(n));
+      if (kind === "adj" || myAdj > 0) {
+        add(el("div", { class: "line" }, "Adjacent reveals (Choose): ", myAdj ? el("span", { class: "tokens" }, tokens(myAdj)) : "none",
+          myAdj > 0 && !(s.adjTargets || []).length ? el("div", { class: "hint" }, "None of your squares touch fog right now.") : null));
+      }
+      // Free Reveals: a count, and a button that arms the eye cursor for one reveal (also the boxed-in bonus one).
+      if (!canReveal()) revealMode = false;
+      if (s.config.lens || kind === "free" || myReveals > 0 || s.stuck) {
+        add(el("div", { class: "line" }, "Free Reveals: ", el("b", {}, String(myReveals))),
+          el("div", { class: "row", style: "margin-top:6px" },
+            el("button", { class: revealMode ? "on" : "", disabled: !canReveal(), onclick: () => { revealMode = !revealMode; freeMode = false; render(); } },
+              revealMode ? "Next click is a FREE reveal (cancel)" : "Choose FREE reveal")));
+      }
+      if (s.stuck && myReveals <= 0) {
+        add(el("p", { class: "hint", style: "color:var(--gold)" }, "Boxed in: you get a bonus Free Reveal. Press Choose FREE reveal, then click any fogged square."));
+      }
+      add(el("div", { style: "margin-top:12px" }, el("button", { class: "warn", onclick: () => { if (confirm("End the game for everyone and reveal the whole card?")) act({ type: "end" }); } }, "End the game")));
+      kids.push(p);
+    }
+    if (s.undo && !s.ended) {
+      const c = s.cells[s.undo.cell];
+      const what = c.name ? `"${c.name}"` : pos(c.i);
+      if (s.undo.color !== me) {
+        kids.unshift(el("div", { class: "banner ask", style: colorVars(s.undo.color) }, el("span", { class: "ctext" }, s.undo.by || cap(s.undo.color)), ` asks to undo their claim on ${what}.`,
+          el("div", { class: "row", style: "margin-top:6px" }, el("button", { class: "primary", onclick: () => act({ type: "undo-answer", yes: true }) }, "Allow"),
+            el("button", { onclick: () => act({ type: "undo-answer", yes: false }) }, "Deny"))));
+      } else {
+        kids.unshift(el("div", { class: "banner info" }, "Undo requested; waiting for an answer."));
+      }
+    }
+    return kids;
+  }
+
+  function notesHelp() {
+    const shown = { private: "private", team: "my color", all: "everyone" };
+    return el("div", { class: "panel" }, el("h2", {}, "Notes"),
+      el("div", { class: "notekeys" }, Object.entries(NOTES).map(([k, n]) => [el("span", { class: "note " + k }, n.glyph),
+        el("span", {}, n.label, el("span", { class: "hint", style: "margin:0" }, ` · ${shown[scopeOf(k)]}`))])),
+      Object.keys(notes).length ? el("p", { class: "hint" }, el("button", { class: "link", onclick: () => { notes = {}; store.set(notesKey, "{}"); render(); } }, "Clear my private notes")) : null);
+  }
+
+  // A square's edge on the Whole card: one color solid; several split it, clockwise from the top-left corner
+  // (two colors: top+right and bottom+left; four: one side each).
+  function ringFill(cols) {
+    const acc = cols.map((col) => (paletteOf(col) || ["#888888"])[0]);
+    if (acc.length === 1) return acc[0];
+    const w = 100 / acc.length;
+    return `conic-gradient(from -45deg, ${acc.map((a, k) => `${a} ${k * w}% ${(k + 1) * w}%`).join(", ")})`;
+  }
+
+  // The players on a color ("Ann", or "Ann, Bo" for teammates); the color's name if nobody is on it any more.
+  function namesOn(col) {
+    const names = state.players.filter((p) => p.color === col).map((p) => p.name);
+    return names.length ? names.join(", ") : cap(col);
+  }
+
+  // Spectators pick what the board shows: the whole card, or exactly what one color sees (its fog). Each color's
+  // button is filled with that color and named after its players.
+  function sideSpectator() {
+    const s = state;
+    if (!s.seenBy) return [];
+    // With shared fog every color sees the same squares, so there are no per-color views to pick.
+    if (viewAs !== "all" && (s.config.sharedFog || !s.colors.includes(viewAs))) viewAs = "all";
+    const pick = (o) => () => { viewAs = o; render(); };
+    const buttons = [el("button", { class: viewAs === "all" ? "on" : "", onclick: pick("all"), title: "Show the whole card" },
+      el("span", { class: "nm" }, "Whole card"), el("span", { class: "fg" }, "everything"))];
+    if (!s.config.sharedFog) {
+      for (const col of s.colors) {
+        buttons.push(el("button", { class: "color" + (viewAs === col ? " on" : ""), style: colorVars(col), onclick: pick(col), title: `Show only what ${namesOn(col)} (${cap(col)}) can see` },
+          el("span", { class: "nm" }, namesOn(col)), el("span", { class: "fg" }, `${cap(col)}'s fog`)));
+      }
+    }
+    let legend = null;
+    if (s.started && viewAs === "all") {
+      legend = s.config.sharedFog
+        ? "Shared fog: everyone sees the same squares. Faded squares: nobody has revealed them yet."
+        : "Showing the whole card. A colored edge shows who has revealed a square (split when several have). Faded squares: nobody has revealed them yet. Pick a player to see only their fog.";
+    } else if (s.started) {
+      legend = ["Showing only what ", el("span", { class: "ctext", style: colorVars(viewAs) }, `${namesOn(viewAs)} (${cap(viewAs)})`), " can see. Fogged squares are hidden from them."];
+    }
+    const missed = s.me && s.me.dropped && !s.ended
+      ? el("div", { class: "banner info" }, "The game started while you were away, so you're watching. To play, use ",
+        el("b", {}, "Change name or color"), " (under In the room) and pick a color; you'll start from your own square, late.")
+      : null;
+    return [missed, el("div", { class: "panel" }, el("h2", {}, "Spectator view"),
+      el("div", { class: "views" }, buttons),
+      legend ? el("p", { class: "hint", style: "margin-top:8px" }, legend) : null)];
+  }
+
+  // "(+4 Free Reveals)" after your own claims; a Bonus Reveal Square's +1 is already mentioned separately.
+  function gainText(g, chest) {
+    if (!g) return "";
+    const lens = g.lens - (chest ? 1 : 0), parts = [];
+    if (lens > 0) parts.push(`+${lens} Free Reveal${lens > 1 ? "s" : ""}`);
+    if (g.adj > 0) parts.push(`+${g.adj} adjacent reveal${g.adj > 1 ? "s" : ""}`);
+    return parts.length ? ` (${parts.join(", ")})` : "";
+  }
+
+  function logView() {
+    const s = state;
+    const items = s.log.slice().reverse().map((e) => {
+      const t = s.started ? fmt(e.at - s.started) : "";
+      const who = e.color ? el("span", { class: "ctext", style: colorVars(e.color) }, e.by || cap(e.color)) : null;
+      const what = e.name ? `"${e.name}"` : e.cell !== undefined ? `a square in the fog (${pos(e.cell)})` : "";
+      let line;
+      switch (e.type) {
+        case "start": line = ["Game started"]; break;
+        case "join-late": line = [who, ` joined as ${cap(e.color)}`]; break;
+        case "claim": line = e.sniped ? [who, " went for ", what, e.free ? " (free)" : ""]
+          : [who, e.free ? " took " : " claimed ", what, e.free ? " for FREE" : "", e.chest ? " and found a Bonus Reveal Square (+1 Free Reveal)" : "", gainText(e.gained, e.chest)]; break;
+        case "cancel": line = [who, " took back ", what, " before it took effect"]; break;
+        case "dropped": line = [who, ` left before the start, so ${cap(e.color)} isn't playing`]; break;
+        case "snipe": line = [el("b", {}, "Snipe! "), who, " sniped ", el("span", { class: "ctext", style: colorVars(e.victim) }, e.victimBy || cap(e.victim)), " on ", what]; break;
+        case "adj": line = [who, e.cell !== undefined ? [" used an adjacent reveal on ", what] : " used an adjacent reveal"]; break;
+        case "lens": line = [who, e.cell !== undefined ? [" used a Free Reveal on ", what] : " used a Free Reveal", e.free ? " (bonus: nothing left to claim)" : ""]; break;
+        case "undo-request": line = [who, " asked to undo ", what]; break;
+        case "undo": line = [who, " undid ", what]; break;
+        case "unmark": line = [who, " unmarked ", what]; break; // only in rooms saved before the undo timer
+        case "undo-denied": line = [who, " denied an undo"]; break;
+        case "end": line = [e.by ? [who, " ended the game. "] : "", e.winner ? [el("span", { class: "ctext", style: colorVars(e.winner) }, cap(e.winner)), " wins"] : "Game over"]; break;
+        default: line = [e.type];
+      }
+      return el("li", {}, el("span", { class: "t" }, t), line);
+    });
+    return el("div", { class: "panel" }, el("h2", {}, "Log"), el("ul", { class: "log" }, items));
+  }
+
+  // A live update that redraws the board between mouse-down and mouse-up makes the browser drop the click, so hold
+  // redraws while a button is down and catch up right after the click has been handled.
+  let buttonDown = false, renderPending = false;
+  document.addEventListener("pointerdown", () => { buttonDown = true; }, true);
+  const release = () => {
+    buttonDown = false;
+    if (renderPending) setTimeout(() => { if (!buttonDown && renderPending) { renderPending = false; render(); } }, 0);
+  };
+  document.addEventListener("pointerup", release, true);
+  document.addEventListener("pointercancel", release, true);
+  window.addEventListener("blur", release);
+
+  function render() {
+    if (buttonDown) { renderPending = true; return; }
+    renderPending = false;
+    const s = state;
+    if (!s) return;
+    const me = s.you.color;
+    const copy = el("button", { onclick: async (e) => { try { await navigator.clipboard.writeText(location.origin + "/r/" + s.id); e.target.textContent = "Copied"; } catch { prompt("Room link:", location.origin + "/r/" + s.id); } } }, "Copy room link");
+    const hide = el("button", { title: "Streamer mode: hide the room code on the page and in the address bar", onclick: () => { streamer.set(!streamer.on()); placeUrl(s.id); render(); } }, streamer.on() ? "Show code" : "Hide code");
+    const top = el("div", { class: "topbar" },
+      el("h1", {}, TITLE),
+      el("span", { class: "badge", style: colorVars(me) }, s.me ? s.me.name : "", me ? ` · ${cap(me)}` : " · spectating"),
+      el("span", {}, "Room ", el("b", {}, shownCode(s.id))), copy, hide,
+      el("span", {}, "Filename: ", el("b", {}, s.filenameSeed)),
+      el("span", { class: "clock", id: "clock" }, s.started ? fmt((s.ended ? s.ended.at : Date.now() + offset) - s.started) : "--:--"),
+      newRoomButton(), helpButton("play"));
+    const c = s.config;
+    const rules = el("p", { class: "sub" }, rulesSummary(c));
+    // Messages go at the top of the side column, never above the board, so the board never moves on the page
+    // (streamers crop their scene to it).
+    const banners = [];
+    if (s.ended) {
+      const w = s.ended.winner;
+      banners.push(el("div", { class: "banner win" }, w ? [el("span", { class: "ctext", style: colorVars(w) }, cap(w)), ` wins: ${s.ended.reason}.`] : `Game over: ${s.ended.reason}.`,
+        el("div", { style: "font-weight:400; margin-top:4px; color: var(--ink)" }, `Card seed: ${s.cardSeed}. Filename: ${s.filenameSeed}.`,
+          me ? el("span", { class: "hint" }, " Dashed outlines: squares you never saw.") : null),
+        el("div", { class: "row", style: "margin-top:8px" }, newRoomButton("Start a new room"))));
+    } else if (!s.started) {
+      // Only colors with someone here count: a player who closed the page doesn't hold the start up.
+      const here = s.colors.filter((x) => s.players.some((p) => p.color === x && !p.away));
+      const gone = s.colors.filter((x) => !here.includes(x));
+      banners.push(el("div", { class: "banner info" }, here.length ? `Ready: ${here.filter((x) => s.ready[x]).length}/${here.length}. Share the room link to invite people.` : "Waiting for players to join.",
+        gone.length ? el("div", { style: "font-weight:400; margin-top:4px" }, gone.map((x, k) => [k ? ", " : "", el("span", { class: "ctext", style: colorVars(x) }, namesOn(x))]),
+          " left the room, so they don't count. If they aren't back when everyone else is ready, the game starts without them.") : null));
+    }
+    if (errMsg) banners.push(el("div", { class: "banner err" }, errMsg));
+    const n = s.config.size || 5;
+    const grid = el("div", { class: `grid n${n}`, style: `--n:${n}` }, s.cells.map(cellView));
+    const side = me ? sidePlayer() : sideSpectator();
+    app.replaceChildren(top, rules,
+      el("div", { class: "layout" },
+        el("div", {}, el("div", { class: "panel" }, grid)),
+        el("div", {}, ...banners, ...side, notesHelp(), people(), logView())));
+  }
+}
+
+// ---------------------------------------------------------------------------------------- route
+// /r/<code> opens a room; /play is the same room page in streamer mode (the tab remembers which room).
+const m = /^\/r\/([a-z0-9]{6})$/.exec(location.pathname);
+let startRoom = m ? m[1] : null;
+if (!startRoom && location.pathname === "/play") { try { startRoom = sessionStorage.getItem("fog-current"); } catch {} }
+if (startRoom) {
+  const t = session.get(startRoom);
+  if (t) roomPage(startRoom, t); else joinPage(startRoom);
+} else {
+  if (location.pathname !== "/") history.replaceState(null, "", "/");
+  createPage();
+}
+</script>
+</body>
+</html>
