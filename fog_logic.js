@@ -18,10 +18,12 @@
 //   homes        each color's random edge or corner start square
 //   notes        note symbols (★ ☐ ✕ ○)
 //   draft        the Draft setting, and room.draft: the draft itself (order, picks); room.drafted: cell -> the color
-//                it was drafted to; room.draftStarts: each color's two drafted start squares
+//                it was drafted to; room.draftStarts: each color's drafted start squares
 //   reverseDraft the Reverse Draft setting (you draft for the next color instead of your own)
-//   draftEasiest the "Start on the two easiest" setting (start squares: your first two picks, or with Reverse Draft
-//                the last two picked for you, instead of two random ones)
+//   easyStart    the Easy start setting: how many squares (1-4, 0 = off) each color starts on, its easiest goals by
+//                BingoSync's difficulty tier, instead of the center and an edge square; room.easyStarts: color ->
+//                those squares. In a Draft room: the color's first picks (Reverse Draft: the last ones picked for it)
+//                instead of two random drafted squares. Rooms saved with the older Draft-only "draftEasiest" read as 2.
 //
 // Draft rooms: once every color is ready, the goals are listed in alphabetical order (never with their place on the
 // card) and the colors take turns drafting them. Then the game starts: each color sees two of its own drafted squares,
@@ -128,7 +130,8 @@ function normalizeConfig(cfg = {}) {
     claimDelay: clampInt(cfg.claimDelay, 0, MAX_CLAIM_DELAY, CLAIM_DELAY), // claim undo timer in seconds (0 = off)
     draft: bool(cfg.draft, false), // colors draft the goals from an alphabetical list before the card appears
     reverseDraft: bool(cfg.draft, false) && bool(cfg.reverseDraft, false), // ...each one for the next color instead
-    draftEasiest: bool(cfg.draft, false) && bool(cfg.draftEasiest, false), // start on the two easiest drafted squares, not random ones
+    // Easy start: 1-4 squares per color, 0 = off. "draftEasiest" was the Draft-only version (always 2).
+    easyStart: clampInt(cfg.easyStart, 0, 4, bool(cfg.draft, false) && bool(cfg.draftEasiest, false) ? 2 : 0),
   };
 }
 
@@ -195,15 +198,19 @@ function upgradeRoom(room) {
   room.notes = room.notes || {};
   upgradeNotes(room);
   if (room.config.claimDelay === undefined) room.config.claimDelay = CLAIM_DELAY;
+  if (room.config.easyStart === undefined) room.config.easyStart = room.config.draftEasiest ? 2 : 0; // the Draft-only "two easiest"
+  delete room.config.draftEasiest;
   room.v = 3;
   return room;
 }
 
 // Each color starts seeing the center and its own random edge or corner square (no two colors share one). Boards
-// with an even size have no single center, so you get the central square nearest your edge square.
+// with an even size have no single center, so you get the central square nearest your edge square. With Easy start,
+// its easiest goals instead (dealt when the game starts); in a Draft room, squares from its own draft.
 function startingView(room, color) {
   const g = geo(room);
   if (room.config.draft) return ((room.draftStarts || {})[color] || []).slice(); // picked when the draft ends
+  if (room.config.easyStart) return ((room.easyStarts || {})[color] || []).slice(); // dealt when the game starts
   if (room.config.goal === "corners") return g.band.slice(); // same distance to every corner
   if (room.starts) {
     const home = (room.homes || {})[color];
@@ -306,7 +313,8 @@ function join(room, token, name, color, now) {
   if (old && old !== color && inLobby(room) && !playersOn(room, old).length) dropColor(room, old, now, false);
   if (color && !room.colors.includes(color)) {
     room.colors.push(color);
-    if (room.starts && !room.config.draft) (room.homes = room.homes || {})[color] = pickHome(room);
+    if (room.starts && !room.config.draft && !room.config.easyStart) (room.homes = room.homes || {})[color] = pickHome(room);
+    if (room.config.easyStart && !room.config.draft && room.started !== null) easyStartForLateColor(room, color);
     addSeen(room, color, startingView(room, color));
     room.lens[color] = room.config.lens;
     room.adj = room.adj || {};
@@ -350,8 +358,9 @@ function isStuck(room, color) {
 
 // --- actions ---------------------------------------------------------------------------------------------
 
-function start(room, now) {
+function start(room, now, rand = Math.random) {
   if (room.started !== null) return err("The game has already started.");
+  if (room.config.easyStart && !room.config.draft) dealEasyStarts(room, rand);
   room.started = now;
   room.log.push({ at: now, type: "start" });
   return { ok: true };
@@ -375,8 +384,36 @@ function maybeStart(room, now, rand = Math.random) {
   for (const c of room.colors.filter((x) => !here.includes(x))) dropColor(room, c, now, true);
   for (const p of Object.values(room.players)) delete p.away;
   if (room.config.draft) { beginDraft(room, now, rand); return false; }
-  start(room, now);
+  start(room, now, rand);
   return true;
+}
+
+// --- Easy start ----------------------------------------------------------------------------------------------
+// The card's goals from easiest to hardest by BingoSync's difficulty tier (ties in random order), kept for colors that
+// join late. With lockout each color gets its own squares, dealt in a random snake order (1 2 2 1...) so the colors'
+// tiers add up about the same (lockout rooms take at most 4 colors x 4 squares, so the board always has enough).
+// Without lockout nobody can block anyone, so every color starts on the same easiest squares.
+function dealEasyStarts(room, rand) {
+  const n = room.config.easyStart;
+  room.easyOrder = shuffled([...Array(geo(room).total).keys()], rand).sort((a, b) => (room.board[a].difficulty | 0) - (room.board[b].difficulty | 0));
+  room.easyStarts = {};
+  if (!room.config.lockout) for (const c of room.colors) room.easyStarts[c] = room.easyOrder.slice(0, n);
+  else {
+    const order = shuffled(room.colors, rand), k = order.length;
+    room.easyOrder.slice(0, n * k).forEach((cell, m) => {
+      const round = Math.floor(m / k), at = m % k, c = order[round % 2 ? k - 1 - at : at];
+      (room.easyStarts[c] = room.easyStarts[c] || []).push(cell);
+    });
+  }
+  for (const c of room.colors) addSeen(room, c, (room.easyStarts[c] = (room.easyStarts[c] || []).sort((a, b) => a - b)));
+}
+// A color joining after the start: with lockout, the easiest squares no other color starts on or holds; without, the
+// same ones as everyone.
+function easyStartForLateColor(room, color) {
+  const n = room.config.easyStart, order = room.easyOrder || [];
+  const taken = new Set(Object.values(room.easyStarts || {}).flat());
+  const cells = room.config.lockout ? order.filter((i) => !taken.has(i) && !marksOn(room, i).some((m) => !m.pending)).slice(0, n) : order.slice(0, n);
+  (room.easyStarts = room.easyStarts || {})[color] = cells.sort((a, b) => a - b);
 }
 
 // --- the draft ---------------------------------------------------------------------------------------------
@@ -440,16 +477,17 @@ function draftPick(room, color, ranks, now, by, rand = Math.random) {
   return { ok: true };
 }
 
-// The last pick: each color gets two of its drafted squares to start from, and the game starts. Random ones (Bonus
-// Reveal Squares only if it has nothing else), or with "start on the two easiest" (draftEasiest) the color's own first
-// two picks; with Reverse Draft, the last two goals picked for it (the other colors hand out the hard ones first).
+// The last pick: each color gets drafted squares to start from, and the game starts. Two random ones (Bonus Reveal
+// Squares only if it has nothing else), or with Easy start that many of the color's own first picks; with Reverse
+// Draft, the last goals picked for it (the other colors hand out the hard ones first).
 function finishDraft(room, now, rand) {
   room.draftStarts = {};
+  const easy = room.config.easyStart || 0;
   for (const c of room.colors) {
     let starts;
-    if (room.config.draftEasiest) {
+    if (easy) {
       const mine = room.draft.picks.filter((p) => p.to === c).map((p) => room.draft.goals[p.rank]);
-      starts = room.config.reverseDraft ? mine.slice(-2) : mine.slice(0, 2);
+      starts = room.config.reverseDraft ? mine.slice(-easy) : mine.slice(0, easy);
     } else {
       const mine = shuffled(draftedTo(room, c), rand);
       starts = mine.filter((i) => !room.chests.includes(i)).concat(mine.filter((i) => room.chests.includes(i))).slice(0, 2);

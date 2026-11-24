@@ -12,8 +12,9 @@ BingoSync.
 
 ## What makes it different
 
-- **The card is hidden.** Each color starts with the center square and one random edge square. Claiming a goal
-  reveals the squares around it, so every claim is also a scouting move.
+- **The card is hidden.** Each color starts with the center square and one random edge square, or with Easy start,
+  on its easiest goals, so nobody opens on a goal that takes hours. Claiming a goal reveals the squares around it, so
+  every claim is also a scouting move.
 - **Everyone has their own fog.** You only see what your color has uncovered. Other players' claims show only as
   their color until you uncover the square yourself. Teammates on the same color share their view.
 - **You choose how the fog lifts.** Reveal the 4 or 8 squares around each claim, aim reveals at squares next to
@@ -49,7 +50,8 @@ the room code, and note symbols you can put on squares (right-click, Ctrl, Alt o
 | Lockout | On (one color per square) or off |
 | Claim undo timer | 5 seconds by default; 1–10 or off in lockout rooms |
 | Shared fog | Everyone sees every reveal |
-| Draft | Draft the goals first; Reverse Draft; start on your two easiest squares |
+| Easy start | Start on your 1–4 easiest goals instead of the center and an edge square |
+| Draft | Draft the goals first, or pick your opponent's (Reverse Draft) |
 | Extras | Starting Free Squares, Starting Free Reveals, Bonus Reveal Squares, room password, shared note symbols |
 
 The **? Help** button in the app explains every setting. Combinations that played badly in simulated games are

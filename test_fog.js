@@ -42,9 +42,11 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
   await check("defaults: Open, Free Reveals off, no free squares, private fog, Reveal 4, 5-second claim wait", () => {
     const c = Fog.normalizeConfig({});
     assert.deepStrictEqual(c, { goal: "open", size: 5, onClaim: "reveal4", sharedFog: false, lens: 0, chests: 0, free: 0, freeReveals: true, lockout: true,
-      noteShare: { silver: "private", square: "private", x: "private", circle: "private" }, claimDelay: 5, draft: false, reverseDraft: false, draftEasiest: false });
+      noteShare: { silver: "private", square: "private", x: "private", circle: "private" }, claimDelay: 5, draft: false, reverseDraft: false, easyStart: 0 });
     assert.strictEqual(Fog.normalizeConfig({ reverseDraft: true }).reverseDraft, false, "Reverse Draft is part of Draft");
-    assert.strictEqual(Fog.normalizeConfig({ draftEasiest: true }).draftEasiest, false, "so is Start on the two easiest");
+    assert.strictEqual(Fog.normalizeConfig({ easyStart: 9 }).easyStart, 4, "Easy start: 1-4 squares");
+    assert.strictEqual(Fog.normalizeConfig({ draft: true, draftEasiest: true }).easyStart, 2, "the older Draft-only 'two easiest' is Easy start 2");
+    assert.strictEqual(Fog.normalizeConfig({ draftEasiest: true }).easyStart, 0, "which only meant something with Draft");
     assert.strictEqual(Fog.normalizeConfig({ chests: 3 }).chests, 3, "Bonus Reveal Squares no longer need Free Reveals on");
     assert.strictEqual(Fog.normalizeConfig({ lens: 5 }).lens, 3, "starting Free Reveals: 1-3");
   });
@@ -410,6 +412,60 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
     assert.strictEqual(Fog.nextPending(r), null);
     assert.ok(r.log.some((e) => e.type === "snipe" && e.victim === "blue"));
     assert.match(r.ended.reason, /Red 1, Blue 1/);
+  });
+
+  // The fake board's difficulty is its cell number + 1, so the easiest squares are 0, 1, 2...
+  const tiers = (cells) => cells.reduce((sum, i) => sum + i + 1, 0);
+
+  await check("easy start (lockout): each color its own easiest squares, dealt so the totals match; no center or edge", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      let x = seed;
+      const rand = () => ((x = (x * 16807) % 2147483647) / 2147483647);
+      const r = mk({ easyStart: 2 }, { randomStarts: true, started: false });
+      assert.deepStrictEqual(Fog.seenOf(r, "red"), [], "nothing is dealt before the start");
+      assert.strictEqual(r.homes.red, undefined, "and there are no edge squares");
+      Fog.start(r, 1000, rand);
+      const red = Fog.seenOf(r, "red"), blue = Fog.seenOf(r, "blue");
+      assert.strictEqual(red.length, 2);
+      assert.deepStrictEqual([...red, ...blue].sort((a, b) => a - b), [0, 1, 2, 3], "the four easiest, none shared");
+      assert.strictEqual(tiers(red), tiers(blue), "snake order: 1+4 against 2+3");
+    }
+    const four = mk({ easyStart: 4 }, { colors: ["red", "blue", "green", "orange"], randomStarts: true, started: false });
+    Fog.start(four, 1000);
+    const all = ["red", "blue", "green", "orange"].flatMap((c) => Fog.seenOf(four, c));
+    assert.deepStrictEqual(all.sort((a, b) => a - b), [...Array(16).keys()], "4 colors x 4: the 16 easiest, each once");
+    const sums = ["red", "blue", "green", "orange"].map((c) => tiers(Fog.seenOf(four, c)));
+    assert.ok(Math.max(...sums) === Math.min(...sums), `even totals: ${sums}`);
+  });
+
+  await check("easy start without lockout: everyone starts on the same easiest squares; late colors too", () => {
+    const r = mk({ easyStart: 3, lockout: false }, { colors: ["red", "blue", "green"], randomStarts: true, started: false });
+    Fog.start(r, 1000);
+    for (const c of ["red", "blue", "green"]) assert.deepStrictEqual(Fog.seenOf(r, c), [0, 1, 2]);
+    assert.ok(Fog.join(r, "tok-pink", "Pi", "pink", 2000).ok);
+    assert.deepStrictEqual(Fog.seenOf(r, "pink"), [0, 1, 2]);
+  });
+
+  await check("easy start: a color joining late (lockout) gets the easiest squares nobody starts on or holds", () => {
+    const r = mk({ easyStart: 1 }, { randomStarts: true, started: false });
+    Fog.start(r, 1000);
+    assert.deepStrictEqual([...Fog.seenOf(r, "red"), ...Fog.seenOf(r, "blue")].sort((a, b) => a - b), [0, 1]);
+    r.seen.red = [...Fog.seenOf(r, "red"), 2].sort((a, b) => a - b);
+    claim(r, "red", 2); // red holds the next easiest
+    assert.ok(Fog.join(r, "tok-green", "Cy", "green", 9000).ok);
+    assert.deepStrictEqual(Fog.seenOf(r, "green"), [3]);
+  });
+
+  await check("easy start: rooms saved with the Draft-only 'two easiest' upgrade to Easy start 2", () => {
+    const saved = mk({ draft: true }, { started: false });
+    saved.config.draftEasiest = true;
+    delete saved.config.easyStart;
+    Fog.upgradeRoom(saved);
+    assert.strictEqual(saved.config.easyStart, 2);
+    assert.strictEqual(saved.config.draftEasiest, undefined);
+    const plain = mk({}, { started: false });
+    delete plain.config.easyStart;
+    assert.strictEqual(Fog.upgradeRoom(plain).config.easyStart, 0, "rooms from before either setting start as before");
   });
 
   await check("random starts: center + a different edge or corner square per color, avoiding Bonus Reveal Squares", () => {
@@ -838,25 +894,26 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
     assert.strictEqual(Fog.draftTurn(end).streak, 1);
   });
 
-  await check("draft: start squares are random, or with Start on the two easiest your first two picks (Reverse: the last two picked for you)", () => {
-    const easy = mkDraft({ draftEasiest: true, chests: 6 });
-    const firstTwo = {};
-    while (Fog.draftTurn(easy)) {
-      const t = Fog.draftTurn(easy);
-      const rank = Fog.viewFor(easy, null, 20).draft.goals.find((g) => !g.to).rank;
-      if ((firstTwo[t.to] = firstTwo[t.to] || []).length < 2) firstTwo[t.to].push(easy.draft.goals[rank]);
-      Fog.draftPick(easy, t.color, rank, 20, "x");
-    }
-    for (const c of easy.colors) assert.deepStrictEqual(Fog.seenOf(easy, c), firstTwo[c].sort((x, y) => x - y), `${c}: its first two picks, Bonus Reveal Squares or not`);
-    const rev = mkDraft({ draftEasiest: true, reverseDraft: true });
-    const lastTwo = {};
-    while (Fog.draftTurn(rev)) {
-      const t = Fog.draftTurn(rev);
-      const rank = Fog.viewFor(rev, null, 20).draft.goals.find((g) => !g.to).rank;
-      (lastTwo[t.to] = lastTwo[t.to] || []).push(rev.draft.goals[rank]);
-      Fog.draftPick(rev, t.color, rank, 20, "x");
-    }
-    for (const c of rev.colors) assert.deepStrictEqual(Fog.seenOf(rev, c), lastTwo[c].slice(-2).sort((x, y) => x - y), `${c}: the last two picked for it`);
+  await check("draft: start squares are two random ones, or with Easy start your first picks (Reverse: the last ones picked for you)", () => {
+    const pickOrder = (room) => {
+      const got = {};
+      while (Fog.draftTurn(room)) {
+        const t = Fog.draftTurn(room);
+        const rank = Fog.viewFor(room, null, 20).draft.goals.find((g) => !g.to).rank;
+        (got[t.to] = got[t.to] || []).push(room.draft.goals[rank]);
+        Fog.draftPick(room, t.color, rank, 20, "x");
+      }
+      return got;
+    };
+    const easy = mkDraft({ easyStart: 3, chests: 6 });
+    const firstPicks = pickOrder(easy);
+    for (const c of easy.colors) assert.deepStrictEqual(Fog.seenOf(easy, c), firstPicks[c].slice(0, 3).sort((x, y) => x - y), `${c}: its first three picks, Bonus Reveal Squares or not`);
+    const old = mkDraft({ draftEasiest: true }); // the older Draft-only setting
+    const oldPicks = pickOrder(old);
+    for (const c of old.colors) assert.deepStrictEqual(Fog.seenOf(old, c), oldPicks[c].slice(0, 2).sort((x, y) => x - y));
+    const rev = mkDraft({ easyStart: 1, reverseDraft: true });
+    const forYou = pickOrder(rev);
+    for (const c of rev.colors) assert.deepStrictEqual(Fog.seenOf(rev, c), forYou[c].slice(-1), `${c}: the last goal picked for it`);
     // Random (the default) changes with the room's random draw.
     const starts = new Set();
     for (const v of [0.1, 0.3, 0.6, 0.9]) { const r = mkDraft({}, { rand: () => v }); draftAll(r); starts.add(JSON.stringify(Fog.seenOf(r, "red"))); }
@@ -1067,6 +1124,24 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
     const visible = new Set(Fog.seenOf(room, "red"));
     assert.strictEqual(visible.size, 3);
     for (let i = 0; i < 36; i++) assert.strictEqual(raw.includes(JSON.stringify(card[i].name)), visible.has(i), `square ${i}`);
+  });
+
+  await check("Easy start over HTTP with a real card: each color starts on its own easiest goals, nothing else", async () => {
+    const r = await call("/api/rooms", { name: "Ann", color: "red", easyStart: 2, filenameSeed: "812345", cardSeed: "4244" });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    const rid = r.data.id, tok = { red: r.data.token };
+    tok.blue = (await call(`/api/rooms/${rid}/join`, { name: "Bo", color: "blue" })).data.token;
+    assert.strictEqual((await call(`/api/rooms/${rid}/info`)).data.config.easyStart, 2);
+    await call(`/api/rooms/${rid}/action?t=${tok.red}`, { type: "ready" });
+    await call(`/api/rooms/${rid}/action?t=${tok.blue}`, { type: "ready" });
+    const room = rooms.get(rid);
+    const tierOf = (cells) => cells.map((i) => room.board[i].difficulty).sort((a, b) => a - b);
+    const seen = {};
+    for (const c of ["red", "blue"]) seen[c] = (await call(`/api/rooms/${rid}/state?t=${tok[c]}`)).data.cells.filter((x) => x.seen).map((x) => x.i);
+    assert.deepStrictEqual(tierOf([...seen.red, ...seen.blue]), [1, 2, 3, 4], "the card's four easiest goals");
+    assert.strictEqual(seen.red.length, 2);
+    assert.ok(!seen.red.some((i) => seen.blue.includes(i)), "none shared in lockout");
+    assert.ok(!seen.red.includes(12) || room.board[12].difficulty <= 4, "the center only if it's one of them");
   });
 
   await check("a Draft room over HTTP: draft by rank; the board never places a goal you haven't revealed", async () => {
