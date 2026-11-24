@@ -146,6 +146,18 @@ dialog.help ul { margin: 0; padding-left: 18px; } dialog.help li { margin: 3px 0
 details > summary { cursor: pointer; color: var(--dim); margin: 8px 0; }
 .problems { margin: 10px 0 0; font-size: 13px; } .problems:empty { display: none; }
 .line { margin-top: 8px; } .line .hint { margin: 0; }
+/* Draft: the draft card uses the board's own grid and squares (.grid, .cell), so it has the board's place and shape. */
+.cell.claimable:focus-visible { border-color: var(--gold); outline: none; }
+.turn { font-size: 16px; margin-top: 8px; }
+/* Draft rooms on the board: a revealed square's edge is the color it was drafted to; a goal nobody drafted is dimmed. */
+.cell.owned { border-color: var(--oc); border-width: 3px; }
+.cell.undrafted { color: var(--dim); }
+.cell.hl { box-shadow: 0 0 0 2px #16181f inset, 0 0 0 4px var(--gold) inset; }
+.mygoals { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.mygoals li { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+.mygoals .st { flex: none; width: 1.2em; text-align: center; font-weight: 700; color: var(--dim); }
+.mygoals .st.done { color: var(--green); } .mygoals .st.here { color: var(--gold); }
+.mygoals li.oncard { cursor: default; }
 </style>
 </head>
 <body>
@@ -217,6 +229,7 @@ function rulesSummary(c) {
   const n = c.size || 5;
   return [
     `${n}x${n}`,
+    c.draft ? `${c.reverseDraft ? "Reverse Draft" : "Draft"}${c.draftEasiest ? " (start on the two easiest)" : ""}` : null,
     c.goal && c.goal !== "open" ? `Goal: ${GOAL_SHORT[c.goal] || c.goal}` : null,
     c.lockout ? "Lockout" : "Non-lockout",
     `Claim undo timer: ${c.claimDelay ? `${c.claimDelay}s` : "off"}`,
@@ -255,6 +268,9 @@ const HELP = [
     "<b>Lockout</b>: one color per square. Off (non-lockout): colors can share squares, shown as split color bands.",
     "<b>Claim undo timer</b> (lockout): on by default, 5 seconds (1-10). Until it runs out, only your color sees a new claim and you can take it back; if several players claim the same square, the first click gets it. Off: claims take effect at once. Rooms without lockout always use 5 seconds.",
     "<b>Shared fog</b>: everyone sees every reveal.",
+    "<b>Draft</b>: once every color is ready, a draft card the size of the board shows the goals in alphabetical order (left to right, top to bottom; not where they are on the real card) and the colors take turns drafting them, in a random snake order (1-2-2-1...), until each color has the same number. A goal left over isn't drafted, and nobody can claim it. Then the real card appears: each color starts with two of its own drafted squares revealed (instead of the center and an edge square), every revealed square is outlined in the color it was drafted to, and you can only claim your own color's squares.",
+    "<b>Reverse Draft</b> (Draft): you draft goals for another color instead of your own. With 2 colors you pick for each other; with more, always for the next color in the draft order.",
+    "<b>Start on the two easiest squares</b> (Draft): off (the default), each color starts with two random squares from its draft. On, it starts with its first two picks; with Reverse Draft, the last two goals picked for it.",
     "<b>Starting Free Squares</b>: each color gets 1-3 Free Squares to claim without doing the goal (for groups that allow it for certain goals, such as all trial beams or boss kills). They show to everyone with diagonal stripes and a FREE tag.",
     "<b>Free Square Reveals</b>: when on, a Free Square reveals squares like a normal claim.",
     "<b>Starting Free Reveals</b>: each color starts with 1-3 Free Reveals.",
@@ -265,6 +281,7 @@ const HELP = [
   ]],
   ["play", "Playing", [
     "<b>Start</b>: each color starts with the center square and one random edge or corner square revealed (a different one for each color). 4x4 and 6x6 have no single center square, so you get the central square nearest your edge square.",
+    "<b>Draft rooms</b>: on your color's turn, click a goal on the draft card, then <b>Draft</b> (in the side column) to confirm. With two picks in a row, click both, then confirm once; the numbers show the order you chose them in. When the real card appears you start with two of your own squares revealed; squares are outlined in the color they were drafted to, and you can only claim your own. <b>Your goals</b> in the side panel lists yours: ✓ claimed, ● revealed (hover to find it on the card), ? still in the fog.",
     "<b>Claiming</b>: click a revealed square to claim it. Until the claim undo timer runs out, only your color sees the claim, and you can take it back by clicking the square again or pressing <b>Undo</b> next to the countdown. Then the claim is permanent and its reveals appear.",
     "<b>Snipes</b> (lockout): if several players claim the same square before their timers run out, the first click gets it and the log shows who sniped whom. A sniped Free Square is given back. While your claim waits, the square flashes in your color: it isn't yours until the countdown ends.",
     "<b>Undo after the timer</b>: click one of your own squares to ask to undo it; another color allows or denies the request. Anything you've seen stays seen.",
@@ -283,6 +300,7 @@ const HELP = [
   ["see", "Who sees what", [
     "You see the squares your color has revealed. Other colors' squares show only their color. Teammates (same color) share fog.",
     "Nobody sees the card until every color presses Ready. A player who leaves before the start (page closed for 30 seconds) stops counting; if they aren't back when everyone else is ready, the game starts without them, and they can watch or join late.",
+    "Draft rooms: everyone sees the whole draft (every goal and who it went to), but not where any goal is on the card, spectators included. Once the draft starts, new colors can't join; teammates on a drafted color and spectators still can.",
     "Spectators see the whole card once the game starts. On the <b>Whole card</b>, a colored edge shows which colors have revealed each square (split between colors when several have), and squares nobody has revealed yet are faded. Each player's button (in their color, with their name) shows only what that player's color sees.",
     "When the game ends, the card is revealed to everyone. Dashed outlines mark squares you never saw.",
   ]],
@@ -426,6 +444,13 @@ function createPage() {
   const lockout = el("input", { type: "checkbox", checked: true });
   const undoTimer = countSetting("Claim undo timer", { min: 1, max: rules.MAX_CLAIM_DELAY || 10, value: rules.CLAIM_DELAY || 5, checked: true, unit: "seconds", indent: true });
   const shared = el("input", { type: "checkbox", checked: false });
+  const draft = el("input", { type: "checkbox", checked: false });
+  const reverseDraft = el("input", { type: "checkbox", checked: false });
+  const reverseDraftRow = el("label", { class: "indent" }, reverseDraft, " Reverse Draft");
+  // Off (the default): each color starts with two random squares from its draft.
+  const draftEasiest = el("input", { type: "checkbox", checked: false });
+  const draftEasiestRow = el("label", { class: "indent", title: "Off: two random squares from your draft. On: your first two picks (with Reverse Draft, the last two picked for you)." },
+    draftEasiest, " Start on the two easiest squares");
   const freeSquares = countSetting("Starting Free Squares", { min: 1, max: 3, value: 1 });
   const freeSquareReveals = el("input", { type: "checkbox", checked: true });
   const freeSquareRevealsRow = el("label", { class: "indent" }, freeSquareReveals, " Free Square Reveals");
@@ -438,17 +463,21 @@ function createPage() {
   const hideCode = el("input", { type: "checkbox", checked: streamer.on() });
   const problemsBox = el("p", { class: "problems" });
 
-  // Rows that only apply while another setting is on: the undo timer is a lockout setting, and Free Square Reveals
-  // needs Free Squares.
-  const syncRows = () => { undoTimer.row.hidden = !lockout.checked; freeSquareRevealsRow.hidden = !freeSquares.on.checked; };
-  lockout.addEventListener("change", syncRows);
-  freeSquares.on.addEventListener("change", syncRows);
+  // Rows that only apply while another setting is on: the undo timer is a lockout setting, Free Square Reveals
+  // needs Free Squares, and Reverse Draft and the start squares are Draft settings.
+  const syncRows = () => {
+    undoTimer.row.hidden = !lockout.checked;
+    freeSquareRevealsRow.hidden = !freeSquares.on.checked;
+    reverseDraftRow.hidden = draftEasiestRow.hidden = !draft.checked;
+  };
+  for (const box of [lockout, freeSquares.on, draft]) box.addEventListener("change", syncRows);
   syncRows();
 
   // The room's settings as the server takes them (normalizeConfig in fog_logic.js lists the names). Without
   // lockout, claimDelay is left out and the room gets the default timer.
   const settings = () => ({
     size: size.value, onClaim: onClaim.value, lockout: lockout.checked, sharedFog: shared.checked,
+    draft: draft.checked, reverseDraft: draft.checked && reverseDraft.checked, draftEasiest: draft.checked && draftEasiest.checked,
     claimDelay: lockout.checked ? undoTimer.value() : undefined,
     free: freeSquares.value(), freeReveals: freeSquareReveals.checked, lens: freeReveals.value(), chests: bonusSquares.value(),
     noteShare: Object.fromEntries(Object.entries(noteSel).map(([k, sel]) => [k, sel.value])),
@@ -496,6 +525,9 @@ function createPage() {
     el("label", {}, lockout, " Lockout"),
     undoTimer.row,
     el("label", {}, shared, " Shared fog"),
+    el("label", {}, draft, " Draft"),
+    reverseDraftRow,
+    draftEasiestRow,
     freeSquares.row,
     freeSquareRevealsRow,
     freeReveals.row,
@@ -556,10 +588,11 @@ async function joinPage(roomId, note, current = null) {
     el("div", { class: "topbar" }, el("h1", {}, TITLE), helpButton("see")),
     el("p", { class: "sub" }, `Room ${shownCode(info.id)} · Filename: ${info.filenameSeed} · ${rulesSummary(info.config)}`),
     el("div", { class: "panel", style: "max-width:640px" },
-      el("h2", {}, info.started ? "Join (game in progress)" : "Join the room"),
+      el("h2", {}, info.started ? "Join (game in progress)" : info.drafting ? "Join (draft in progress)" : "Join the room"),
       ...id.nodes,
       pwBox ? el("label", { class: "field" }, el("span", {}, "Room password"), pwBox.node) : null,
       el("p", { class: "hint" }, `Players on the same color are a team. Players: ${playing}/${max}. ${playersAdvice(info.config)}`),
+      info.config.draft && (info.drafting || info.started) ? el("p", { class: "hint", style: "color:var(--gold)" }, "The draft has started, so new colors can't join: pick a color that's already playing (as a teammate), or spectate.") : null,
       playing >= max ? el("p", { class: "hint", style: "color:var(--gold)" }, "This room is full. You can still spectate, or take your old place back with your old nickname and color.") : null,
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "primary", onclick: () => join(false) }, "Join"), el("button", { onclick: () => join(true) }, "Spectate")),
       err));
@@ -572,6 +605,9 @@ function roomPage(roomId, token) {
   placeUrl(roomId);
   // freeMode: the next claim takes the square FREE. revealMode: the next click on the fog spends a Free Reveal.
   let state = null, offset = 0, selected = null, freeMode = false, revealMode = false, viewAs = "all";
+  // Draft rooms: draftSel is the goals (their places in the alphabetical list) chosen on your turn, in the order
+  // chosen, waiting for the Draft button; newPicks are the goals drafted since the last update (they flash once).
+  let draftSel = [], newPicks = new Set();
   // Private symbols live only in this browser (never sent to the server). Symbols the room shares go to the server,
   // which shows them to your color or to everyone. Spectators keep every symbol private.
   const notesKey = `fog-notes-${roomId}`;
@@ -629,10 +665,15 @@ function roomPage(roomId, token) {
       prevSeen = seen;
     }
     if (selected !== null && !s.cells[selected].marks.some((m) => m.color === color)) selected = null;
+    const d = s.draft;
+    const t = d && d.turn;
+    draftSel = t && t.color === color ? draftSel.filter((r) => !d.goals[r].to).slice(-t.streak) : [];
+    newPicks = new Set(d && state && state.draft ? d.goals.filter((g) => g.to && !state.draft.goals[g.rank].to).map((g) => g.rank) : []);
     state = s;
     errMsg = errMsg.startsWith("Connection") ? "" : errMsg;
     render();
     newlySeen = new Set();
+    newPicks = new Set();
   });
   es.onerror = async () => {
     try { await api(`/api/rooms/${roomId}/state?t=${encodeURIComponent(token)}`); }
@@ -712,6 +753,15 @@ function roomPage(roomId, token) {
     const ring = seenCols && seenCols.length && !s.config.sharedFog;
     if (seenCols && !seenCols.length) { cls.push("unseen"); tip += " · nobody has revealed this yet"; }
     if (ring) tip += ` · revealed by ${seenCols.map((col) => `${namesOn(col)} (${cap(col)})`).join(", ")}`;
+    // Draft rooms: the edge is the color the square was drafted to (the server only says for squares you can read).
+    if (!fogged && c.owner) {
+      cls.push("owned");
+      style += `;--oc:${(paletteOf(c.owner) || ["#888888"])[0]}`;
+      tip += c.owner === me ? " · drafted to your color" : ` · drafted to ${namesOn(c.owner)} (${cap(c.owner)}): only they can claim it`;
+    } else if (!fogged && c.owner === null) {
+      cls.push("undrafted");
+      tip += " · not drafted: nobody can claim it";
+    }
     const freeMarks = marks.filter((m) => m.free);
     const node = el("div", { class: cls.join(" "), style, "data-cell": c.i, title: tip },
       ring ? el("span", { class: "ring", style: `background:${ringFill(seenCols)}` }) : null,
@@ -746,8 +796,9 @@ function roomPage(roomId, token) {
   }
 
   const myMark = (c) => (state.you.color ? c.marks.find((m) => m.color === state.you.color) || null : null);
-  // Lockout: only an unmarked square. Non-lockout: any square your color hasn't marked yet.
-  const canTake = (c) => (state.config.lockout ? c.marks.length === 0 : !myMark(c));
+  // Lockout: only an unmarked square. Non-lockout: any square your color hasn't marked yet. Draft rooms: only
+  // squares drafted to your color.
+  const canTake = (c) => (!state.config.draft || c.owner === state.you.color) && (state.config.lockout ? c.marks.length === 0 : !myMark(c));
 
   // One click does it:
   //   a fogged square: revealed, if you have a reveal for it (see revealKind);
@@ -788,16 +839,21 @@ function roomPage(roomId, token) {
       el("ul", { class: "people" }, rows.map((p) => el("li", { style: colorVars(p.color) },
         p.color ? el("span", { class: "dot" }) : el("span", { class: "dot", style: "background:#666" }),
         el("span", {}, p.name), el("span", { class: "hint", style: "margin:0" },
-          p.color ? `${cap(p.color)}${!s.started ? (p.away ? " · left (doesn't count for Ready)" : s.ready[p.color] ? " · ready" : " · not ready") : ` · ${s.counts[p.color]} sq`}` : `spectating${p.away ? " · left" : ""}`)))),
+          p.color ? `${cap(p.color)}${!s.started && s.draft ? ` · ${s.draft.goals.filter((g) => g.to === p.color).length} drafted`
+            : !s.started ? (p.away ? " · left (doesn't count for Ready)" : s.ready[p.color] ? " · ready" : " · not ready") : ` · ${s.counts[p.color]} sq`}` : `spectating${p.away ? " · left" : ""}`)))),
       el("p", { class: "hint" }, el("button", { class: "link", onclick: () => { es.close(); joinPage(roomId, "", s.me); } }, "Change name or color")));
   }
 
   function sidePlayer() {
     const s = state, me = s.you.color, kids = [];
-    if (!s.started) {
+    if (!s.started && s.draft) {
+      kids.push(el("div", { class: "panel" }, el("h2", {}, "Before the start"),
+        el("p", { style: "margin:0" }, "Load Beta Quest file ", el("b", {}, s.filenameSeed), ". The card appears as soon as the draft is over, and the clock starts then.")));
+    } else if (!s.started) {
       const ready = !!s.ready[me];
       kids.push(el("div", { class: "panel" }, el("h2", {}, "Before the start"),
-        el("p", { style: "margin-top:0" }, "Load Beta Quest file ", el("b", {}, s.filenameSeed), ". The card appears when every color is ready."),
+        el("p", { style: "margin-top:0" }, "Load Beta Quest file ", el("b", {}, s.filenameSeed),
+          s.config.draft ? ". The draft starts when every color is ready; the card appears after it." : ". The card appears when every color is ready."),
         el("button", { class: ready ? "warn" : "primary", onclick: () => act({ type: "ready", ready: !ready }) }, ready ? "Not ready" : "Ready")));
     } else if (!s.ended) {
       const sel = selected === null ? null : s.cells[selected];
@@ -865,6 +921,111 @@ function roomPage(roomId, token) {
     return kids;
   }
 
+  // ---- Draft rooms
+  // The draft card takes the board's place, in the same spot and shape (so a scene cropped to the board shows it):
+  // every goal in alphabetical order, left to right and top to bottom (nothing to do with where it is on the real
+  // card), filled with the color it was drafted to. Whose turn it is and the Draft button are in the side column.
+  const myDraftTurn = () => { const t = state.draft && state.draft.turn; return t && state.you.color && t.color === state.you.color ? t : null; };
+  // On your turn, click as many goals as you have picks in a row (one more drops the first you chose), then Draft.
+  function chooseGoal(rank) {
+    const turn = myDraftTurn();
+    if (!turn) return;
+    draftSel = draftSel.includes(rank) ? draftSel.filter((r) => r !== rank) : draftSel.concat(rank).slice(-turn.streak);
+    render();
+  }
+  function draftCard() {
+    const s = state, d = s.draft, n = s.config.size || 5, turn = myDraftTurn();
+    const tiles = d.goals.map((g) => {
+      const pickable = !!turn && !g.to;
+      const at = draftSel.indexOf(g.rank);
+      const cls = ["cell"];
+      if (g.to) cls.push("claimed");
+      if (pickable) cls.push("claimable");
+      if (at >= 0) cls.push("sel");
+      if (newPicks.has(g.rank)) cls.push("new");
+      const picker = g.by || (g.color ? cap(g.color) : "");
+      const attrs = {
+        class: cls.join(" "), style: g.to ? colorVars(g.to) : "", "data-rank": g.rank,
+        title: g.to ? `Drafted to ${namesOn(g.to)} (${cap(g.to)})${d.reverse ? ` by ${picker}` : ""}` : pickable ? "Click to choose this goal" : "Not drafted yet",
+      };
+      if (pickable) Object.assign(attrs, { role: "button", tabindex: 0, onclick: () => chooseGoal(g.rank), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chooseGoal(g.rank); } } });
+      return el("div", attrs, g.name,
+        at >= 0 && turn.streak > 1 ? el("span", { class: "tag", title: "The order you chose them in" }, String(at + 1)) : null,
+        g.to ? el("span", { class: "who" }, d.reverse ? `from ${picker}` : picker) : null);
+    });
+    return el("div", { class: "panel" }, el("div", { class: `grid n${n}`, style: `--n:${n}` }, tiles));
+  }
+
+  // The side column during the draft: whose turn it is, your chosen goals and the Draft button, and how it works.
+  function draftSide() {
+    const s = state, d = s.draft, me = s.you.color, turn = d.turn, mine = myDraftTurn();
+    const who = (col) => el("span", { class: "ctext", style: colorVars(col) }, `${namesOn(col)} (${cap(col)})`);
+    const goals = turn && turn.streak > 1 ? `${turn.streak} goals` : "a goal";
+    const status = !turn ? "The draft is over."
+      : mine ? [el("b", {}, "Your turn: "), `draft ${goals}`, d.reverse ? [" for ", who(turn.to)] : " for your color", "."]
+      : [who(turn.color), ` is drafting ${goals}`, d.reverse ? [" for ", turn.to === me ? el("b", {}, "you") : who(turn.to)] : "", "."];
+    const chosen = draftSel.map((r) => d.goals[r]);
+    const label = (chosen.length > 2 ? `Draft these ${chosen.length} goals` : `Draft ${chosen.map((g) => `"${g.name}"`).join(" and ")}`) + (d.reverse && turn ? ` for ${cap(turn.to)}` : "");
+    const more = mine && chosen.length && chosen.length < mine.streak ? mine.streak - chosen.length : 0;
+    const confirm = !mine ? null : chosen.length
+      ? [el("div", { class: "row", style: "margin-top:8px" },
+        el("button", { class: "primary", onclick: () => { const ranks = draftSel; draftSel = []; act({ type: "draft", ranks }); } }, label),
+        el("button", { onclick: () => { draftSel = []; render(); } }, "Cancel")),
+      more ? el("p", { class: "hint" }, `You can choose ${more} more, or draft ${chosen.length === 1 ? "this one" : "these"} now.`) : null]
+      : el("p", { class: "hint" }, mine.streak > 1 ? `You have ${mine.streak} picks in a row: click ${mine.streak === 2 ? "both goals" : `${mine.streak} goals`} on the card, then confirm.` : "Click a goal on the card, then confirm.");
+    const left = d.goals.length - d.total;
+    const startRule = !s.config.draftEasiest ? "You start with two of your goals revealed, picked at random."
+      : d.reverse ? "You start with the last two goals picked for you revealed." : "You start with your first two picks revealed.";
+    return el("div", { class: "panel" },
+      el("div", { class: "row", style: "justify-content:space-between" }, el("h2", { style: "margin:0" }, d.reverse ? "Reverse Draft" : "Draft"),
+        turn ? el("span", { class: "hint", style: "margin:0" }, `Round ${turn.round} of ${d.per} · pick ${turn.pick} of ${d.total}`) : null),
+      el("div", { class: "turn" }, status),
+      confirm,
+      el("p", { class: "hint" }, `The goals are in alphabetical order, not where they are on the real card. Each color gets ${d.per}`,
+        left ? `; ${left === 1 ? "1 goal is" : `${left} goals are`} left over, and nobody can claim ${left === 1 ? "it" : "them"}. ` : ". ", startRule));
+  }
+
+  // Draft rooms, in the side column: the goals drafted to each color. Yours come first, and once the card is out,
+  // with where each stands (✓ claimed, ● revealed, ? still in the fog); hover a revealed one to find it on the card.
+  // Spectators (and everyone at the end) see every color's that way; players see other colors' goals by name, as in
+  // the draft.
+  let othersOpen = false;
+  function goalsPanel() {
+    const s = state, d = s.draft, me = s.you.color;
+    if (!d) return null;
+    const live = !!(s.started || s.ended);
+    // Has the color a goal was drafted to revealed it? (null: this page can't tell, e.g. another color at the end)
+    const revealedTo = (g) => (g.to === me ? s.cells[g.cell].seen : s.seenBy ? (s.seenBy[g.to] || []).includes(g.cell) : null);
+    const statusOf = (g) => {
+      const fog = { mark: "?", cls: "", tip: s.ended ? "Never revealed" : "Still in the fog" };
+      if (g.cell === undefined) return fog;
+      const m = s.cells[g.cell].marks.find((x) => x.color === g.to);
+      if (m && m.pending) return { mark: "…", cls: "here", tip: "Claimed: takes effect when the timer runs out" };
+      if (m) return { mark: "✓", cls: "done", tip: m.free ? "Claimed (free)" : "Claimed" };
+      const seen = revealedTo(g);
+      if (seen === false) return fog;
+      if (seen === null) return { mark: "·", cls: "", tip: "Not claimed" };
+      return { mark: "●", cls: "here", tip: "Revealed, not claimed yet" };
+    };
+    const highlight = (cell, on) => { const n = document.querySelector(`.grid [data-cell="${cell}"]`); if (n) n.classList.toggle("hl", on); };
+    const list = (col, withStatus) => el("ul", { class: "mygoals" }, d.goals.filter((g) => g.to === col).map((g) => {
+      const st = withStatus ? statusOf(g) : null;
+      const attrs = st ? { title: st.tip } : {};
+      if (st && g.cell !== undefined) Object.assign(attrs, { class: "oncard", onmouseenter: () => highlight(g.cell, true), onmouseleave: () => highlight(g.cell, false) });
+      return el("li", attrs, st ? el("span", { class: "st " + st.cls }, st.mark) : null, el("span", {}, g.name));
+    }));
+    const claimed = (col) => d.goals.filter((g) => g.to === col && g.cell !== undefined && s.cells[g.cell].marks.some((m) => m.color === col && !m.pending)).length;
+    const summary = (col) => (live && (col === me || !me || s.ended) ? `${claimed(col)} of ${d.per} claimed` : `${d.goals.filter((g) => g.to === col).length} of ${d.per} drafted`);
+    const block = (col) => [el("div", { class: "line" }, el("span", { class: "ctext", style: colorVars(col) }, `${namesOn(col)} (${cap(col)})`),
+      el("span", { class: "hint", style: "margin:0" }, ` · ${summary(col)}`)), list(col, live && (col === me || !me || s.ended))];
+    const others = d.order.filter((c) => c !== me);
+    const kids = [el("h2", {}, me ? "Your goals" : "Drafted goals")];
+    if (me) kids.push(el("p", { class: "hint", style: "margin:0 0 6px" }, summary(me)), list(me, live));
+    if (me && others.length) kids.push(el("details", { open: othersOpen, ontoggle: (e) => { othersOpen = e.target.open; } }, el("summary", {}, "Other colors' goals"), others.map(block)));
+    else kids.push(others.map(block));
+    return el("div", { class: "panel" }, kids);
+  }
+
   function notesHelp() {
     const shown = { private: "private", team: "my color", all: "everyone" };
     return el("div", { class: "panel" }, el("h2", {}, "Notes"),
@@ -908,13 +1069,18 @@ function roomPage(roomId, token) {
     if (s.started && viewAs === "all") {
       legend = s.config.sharedFog
         ? "Shared fog: everyone sees the same squares. Faded squares: nobody has revealed them yet."
-        : "Showing the whole card. A colored edge shows who has revealed a square (split when several have). Faded squares: nobody has revealed them yet. Pick a player to see only their fog.";
+        : s.config.draft
+          ? "Showing the whole card. Outer edge: the color a square was drafted to. Inner edge: who has revealed it (split when several have). Faded squares: nobody has revealed them yet. Pick a player to see only their fog."
+          : "Showing the whole card. A colored edge shows who has revealed a square (split when several have). Faded squares: nobody has revealed them yet. Pick a player to see only their fog.";
     } else if (s.started) {
       legend = ["Showing only what ", el("span", { class: "ctext", style: colorVars(viewAs) }, `${namesOn(viewAs)} (${cap(viewAs)})`), " can see. Fogged squares are hidden from them."];
     }
     const missed = s.me && s.me.dropped && !s.ended
-      ? el("div", { class: "banner info" }, "The game started while you were away, so you're watching. To play, use ",
-        el("b", {}, "Change name or color"), " (under In the room) and pick a color; you'll start from your own square, late.")
+      ? el("div", { class: "banner info" }, s.config.draft
+        ? ["The draft started while you were away, so you're watching. To play, use ", el("b", {}, "Change name or color"),
+          " (under In the room) and join a color that's playing, as a teammate."]
+        : ["The game started while you were away, so you're watching. To play, use ", el("b", {}, "Change name or color"),
+          " (under In the room) and pick a color; you'll start from your own square, late."])
       : null;
     return [missed, el("div", { class: "panel" }, el("h2", {}, "Spectator view"),
       el("div", { class: "views" }, buttons),
@@ -939,6 +1105,8 @@ function roomPage(roomId, token) {
       let line;
       switch (e.type) {
         case "start": line = ["Game started"]; break;
+        case "draft-start": line = ["The draft started"]; break;
+        case "draft": line = [who, " drafted ", what, e.to && e.to !== e.color ? [" for ", el("span", { class: "ctext", style: colorVars(e.to) }, namesOn(e.to))] : ""]; break;
         case "join-late": line = [who, ` joined as ${cap(e.color)}`]; break;
         case "claim": line = e.sniped ? [who, " went for ", what, e.free ? " (free)" : ""]
           : [who, e.free ? " took " : " claimed ", what, e.free ? " for FREE" : "", e.chest ? " and found a Bonus Reveal Square (+1 Free Reveal)" : "", gainText(e.gained, e.chest)]; break;
@@ -997,7 +1165,7 @@ function roomPage(roomId, token) {
         el("div", { style: "font-weight:400; margin-top:4px; color: var(--ink)" }, `Card seed: ${s.cardSeed}. Filename: ${s.filenameSeed}.`,
           me ? el("span", { class: "hint" }, " Dashed outlines: squares you never saw.") : null),
         el("div", { class: "row", style: "margin-top:8px" }, newRoomButton("Start a new room"))));
-    } else if (!s.started) {
+    } else if (!s.started && !s.draft) {
       // Only colors with someone here count: a player who closed the page doesn't hold the start up.
       const here = s.colors.filter((x) => s.players.some((p) => p.color === x && !p.away));
       const gone = s.colors.filter((x) => !here.includes(x));
@@ -1009,10 +1177,14 @@ function roomPage(roomId, token) {
     const n = s.config.size || 5;
     const grid = el("div", { class: `grid n${n}`, style: `--n:${n}` }, s.cells.map(cellView));
     const side = me ? sidePlayer() : sideSpectator();
+    // Draft rooms: the draft card takes the board's place until the real card appears; the turn and the Draft button
+    // go at the top of the side column.
+    const drafting = !!(s.draft && !s.started && !s.ended);
+    document.title = drafting && myDraftTurn() ? `Your pick · ${TITLE}` : TITLE;
     app.replaceChildren(top, rules,
       el("div", { class: "layout" },
-        el("div", {}, el("div", { class: "panel" }, grid)),
-        el("div", {}, ...banners, ...side, notesHelp(), people(), logView())));
+        el("div", {}, drafting ? draftCard() : el("div", { class: "panel" }, grid)),
+        el("div", {}, ...banners, drafting ? draftSide() : null, ...side, goalsPanel(), notesHelp(), people(), logView())));
   }
 }
 

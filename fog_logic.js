@@ -17,6 +17,15 @@
 //   claimDelay   the claim undo timer, in seconds (0 = off)
 //   homes        each color's random edge or corner start square
 //   notes        note symbols (★ ☐ ✕ ○)
+//   draft        the Draft setting, and room.draft: the draft itself (order, picks); room.drafted: cell -> the color
+//                it was drafted to; room.draftStarts: each color's two drafted start squares
+//   reverseDraft the Reverse Draft setting (you draft for the next color instead of your own)
+//   draftEasiest the "Start on the two easiest" setting (start squares: your first two picks, or with Reverse Draft
+//                the last two picked for you, instead of two random ones)
+//
+// Draft rooms: once every color is ready, the goals are listed in alphabetical order (never with their place on the
+// card) and the colors take turns drafting them. Then the game starts: each color sees two of its own drafted squares,
+// and can only claim squares drafted to it.
 "use strict";
 
 const SIZES = [4, 5, 6];
@@ -117,6 +126,9 @@ function normalizeConfig(cfg = {}) {
     lockout: bool(cfg.lockout, true), // off: several colors can mark the same square (BingoSync "non-lockout")
     noteShare: normalizeNoteShare(cfg.noteShare),
     claimDelay: clampInt(cfg.claimDelay, 0, MAX_CLAIM_DELAY, CLAIM_DELAY), // claim undo timer in seconds (0 = off)
+    draft: bool(cfg.draft, false), // colors draft the goals from an alphabetical list before the card appears
+    reverseDraft: bool(cfg.draft, false) && bool(cfg.reverseDraft, false), // ...each one for the next color instead
+    draftEasiest: bool(cfg.draft, false) && bool(cfg.draftEasiest, false), // start on the two easiest drafted squares, not random ones
   };
 }
 
@@ -164,8 +176,12 @@ function removeMark(room, i, color) {
 }
 function canTake(room, color, i) {
   if (markOf(room, i, color)) return false;
+  if (room.config.draft && draftedOwner(room, i) !== color) return false; // only the color it was drafted to
   return room.config.lockout ? !marksOn(room, i).some((m) => !m.pending) : true;
 }
+// Draft rooms: the color a square was drafted to (null: nobody drafted it), and the squares drafted to a color.
+const draftedOwner = (room, i) => (room.drafted || {})[i] || null;
+const draftedTo = (room, color) => Object.keys(room.drafted || {}).map(Number).filter((i) => room.drafted[i] === color).sort((a, b) => a - b);
 
 // Rooms saved by the previous version kept one claim object per square and had no lockout setting.
 function upgradeRoom(room) {
@@ -187,6 +203,7 @@ function upgradeRoom(room) {
 // with an even size have no single center, so you get the central square nearest your edge square.
 function startingView(room, color) {
   const g = geo(room);
+  if (room.config.draft) return ((room.draftStarts || {})[color] || []).slice(); // picked when the draft ends
   if (room.config.goal === "corners") return g.band.slice(); // same distance to every corner
   if (room.starts) {
     const home = (room.homes || {})[color];
@@ -275,6 +292,9 @@ function join(room, token, name, color, now) {
   const nick = cleanName(name);
   if (!nick) return err("Pick a nickname.");
   if (color !== null && !COLORS.includes(color)) return err("Pick one of the preset colors.");
+  // A color that joins after the draft would have no squares, so only teammates on a drafted color can join then.
+  if (color !== null && room.draft && !room.colors.includes(color))
+    return err("The draft has started, so no new colors can join. Pick a color that's already playing, or spectate.");
   if (color !== null) {
     const max = maxPlayers(room.config);
     const others = Object.entries(room.players).filter(([t, p]) => t !== token && p.color).length;
@@ -283,10 +303,10 @@ function join(room, token, name, color, now) {
   const old = room.players[token] ? room.players[token].color : null;
   room.players[token] = { name: nick, color, joined: now };
   // Switching color before the start: a color nobody is on any more leaves the room (it would block Ready forever).
-  if (old && old !== color && room.started === null && !playersOn(room, old).length) dropColor(room, old, now, false);
+  if (old && old !== color && inLobby(room) && !playersOn(room, old).length) dropColor(room, old, now, false);
   if (color && !room.colors.includes(color)) {
     room.colors.push(color);
-    if (room.starts) (room.homes = room.homes || {})[color] = pickHome(room);
+    if (room.starts && !room.config.draft) (room.homes = room.homes || {})[color] = pickHome(room);
     addSeen(room, color, startingView(room, color));
     room.lens[color] = room.config.lens;
     room.adj = room.adj || {};
@@ -318,6 +338,11 @@ const pendingMarks = (room, color) => Object.values(room.claims).flat().filter((
 function isStuck(room, color) {
   if (claimable(room, color).length) return false;
   if (pendingMarks(room, color).length) return false;
+  // Draft: once every square drafted to your color is in view, more reveals can't help you.
+  if (room.config.draft) {
+    const seen = new Set(seenOf(room, color));
+    if (!draftedTo(room, color).some((i) => !seen.has(i))) return false;
+  }
   if (room.lens[color] > 0) return false;
   if ((room.adj && room.adj[color]) > 0 && adjacentTargets(room, color).length) return false;
   return true;
@@ -334,18 +359,105 @@ function start(room, now) {
 
 // Before the start, a player whose page has been closed for a while is away (the server decides when). Only colors
 // with someone still here have to press Ready, so a player who leaves can't hold the game up. A color with nobody
-// here when the game starts is out of it: its players become spectators, and can join again (late) if they return.
+// here when the game starts (or, in a Draft room, when the draft starts) is out of it: its players become
+// spectators, and can join again (late) if they return.
 const playersOn = (room, color) => Object.values(room.players).filter((p) => p.color === color);
 const hereColors = (room) => room.colors.filter((c) => playersOn(room, c).some((p) => !p.away));
+// The lobby: before the start and, in a Draft room, before the draft. Joining, Ready and "away" happen here.
+const inLobby = (room) => room.started === null && !room.draft;
 
-function maybeStart(room, now) {
-  if (room.started !== null) return false;
+// Everyone here is ready: the game starts, or in a Draft room the draft does (rand: float in [0,1), for the draft
+// order). Returns true only when the game itself started.
+function maybeStart(room, now, rand = Math.random) {
+  if (!inLobby(room)) return false;
   const here = hereColors(room);
   if (!here.length || !here.every((c) => room.ready[c])) return false;
   for (const c of room.colors.filter((x) => !here.includes(x))) dropColor(room, c, now, true);
   for (const p of Object.values(room.players)) delete p.away;
+  if (room.config.draft) { beginDraft(room, now, rand); return false; }
   start(room, now);
   return true;
+}
+
+// --- the draft ---------------------------------------------------------------------------------------------
+// The colors take turns in a random snake order (1 2 3 3 2 1 1 2 3...) until each has the same number of goals; a
+// goal or two may be left over (25 goals for 2 colors: 12 each), and nobody can claim those. With Reverse Draft each
+// color drafts for the next color in the order instead of itself (with 2 colors: for the other one).
+// The goals are kept as cells sorted by name; a pick names a goal by its place in that list ("rank"), so nothing a
+// page gets during the draft says where a goal is on the card.
+function beginDraft(room, now, rand) {
+  const byName = (a, b) => room.board[a].name.localeCompare(room.board[b].name, "en", { sensitivity: "base", numeric: true }) || a - b;
+  room.draft = {
+    order: shuffled(room.colors, rand),
+    per: Math.floor(geo(room).total / room.colors.length), // goals per color
+    goals: [...Array(geo(room).total).keys()].sort(byName),
+    picks: [], // {rank, color (who picked), to (the color it was drafted to), by}
+  };
+  room.drafted = {};
+  room.log.push({ at: now, type: "draft-start" });
+}
+
+// Who makes pick number m (from 0) in the snake order.
+const pickerAt = (d, m) => { const k = d.order.length, round = Math.floor(m / k), at = m % k; return d.order[round % 2 ? k - 1 - at : at]; };
+
+// Whose pick it is: {color, to, round, pick, streak}, or null when there's no draft going on. streak: how many picks
+// in a row that color has now (2 at the turn of a snake round), which it can make in one go.
+function draftTurn(room) {
+  const d = room.draft;
+  if (!d || room.started !== null || room.ended) return null;
+  const k = d.order.length, n = d.picks.length, total = d.per * k;
+  if (n >= total) return null;
+  const color = pickerAt(d, n);
+  const to = room.config.reverseDraft ? d.order[(d.order.indexOf(color) + 1) % k] : color;
+  let streak = 1;
+  while (n + streak < total && pickerAt(d, n + streak) === color) streak++;
+  return { color, to, round: Math.floor(n / k) + 1, pick: n + 1, streak };
+}
+
+// Draft one goal, or several when your color has that many picks in a row (ranks: a number or a list, in the order
+// they were chosen). All or nothing: if one can't be drafted, none are.
+function draftPick(room, color, ranks, now, by, rand = Math.random) {
+  const turn = draftTurn(room);
+  if (!turn) return err("There's no draft going on.");
+  if (!room.colors.includes(color)) return err("Only players with a color can do that.");
+  if (turn.color !== color) return err("It's not your color's turn to draft.");
+  const d = room.draft;
+  const list = Array.isArray(ranks) ? ranks : [ranks];
+  if (!list.length) return err("Choose a goal to draft.");
+  if (list.length > turn.streak) return err(turn.streak === 1 ? "You have one pick right now." : `You have ${turn.streak} picks in a row right now.`);
+  for (const rank of list) {
+    if (!Number.isInteger(rank) || rank < 0 || rank >= d.goals.length) return err("That isn't a goal on this card.");
+    if (d.picks.some((p) => p.rank === rank)) return err("That goal has already been drafted.");
+  }
+  if (new Set(list).size !== list.length) return err("You chose the same goal twice.");
+  for (const rank of list) {
+    const cell = d.goals[rank];
+    d.picks.push({ rank, color, to: turn.to, by: by || null });
+    room.drafted[cell] = turn.to;
+    room.log.push({ at: now, type: "draft", color, to: turn.to, name: room.board[cell].name, by: by || null }); // no cell: it would give the place away
+  }
+  if (!draftTurn(room)) finishDraft(room, now, rand);
+  return { ok: true };
+}
+
+// The last pick: each color gets two of its drafted squares to start from, and the game starts. Random ones (Bonus
+// Reveal Squares only if it has nothing else), or with "start on the two easiest" (draftEasiest) the color's own first
+// two picks; with Reverse Draft, the last two goals picked for it (the other colors hand out the hard ones first).
+function finishDraft(room, now, rand) {
+  room.draftStarts = {};
+  for (const c of room.colors) {
+    let starts;
+    if (room.config.draftEasiest) {
+      const mine = room.draft.picks.filter((p) => p.to === c).map((p) => room.draft.goals[p.rank]);
+      starts = room.config.reverseDraft ? mine.slice(-2) : mine.slice(0, 2);
+    } else {
+      const mine = shuffled(draftedTo(room, c), rand);
+      starts = mine.filter((i) => !room.chests.includes(i)).concat(mine.filter((i) => room.chests.includes(i))).slice(0, 2);
+    }
+    room.draftStarts[c] = starts.sort((a, b) => a - b);
+    addSeen(room, c, room.draftStarts[c]);
+  }
+  start(room, now);
 }
 
 // Take a color out of a room that hasn't started. atStart: nobody on it was here when the game began (logged, and
@@ -363,20 +475,21 @@ function dropColor(room, color, now, atStart) {
 
 // The server calls this when a player's page has been closed for a while (away) or opens again. It only matters
 // before the start, and going away can start the game, if everyone still here is ready.
-function setAway(room, token, away, now) {
+function setAway(room, token, away, now, rand = Math.random) {
   const p = room.players[token];
-  if (!p || room.started !== null || !!p.away === !!away) return { ok: true, changed: false, started: false };
+  if (!p || !inLobby(room) || !!p.away === !!away) return { ok: true, changed: false, started: false };
   if (away) p.away = true;
   else delete p.away;
-  return { ok: true, changed: true, started: maybeStart(room, now) };
+  return { ok: true, changed: true, started: maybeStart(room, now, rand) };
 }
 
-// The game starts once every color with someone here is ready.
-function setReady(room, color, ready, now) {
+// The game (or in a Draft room, the draft) starts once every color with someone here is ready.
+function setReady(room, color, ready, now, rand = Math.random) {
   if (room.started !== null) return err("The game has already started.");
+  if (room.draft) return err("The draft has already started.");
   if (!room.colors.includes(color)) return err("Only players with a color can do that.");
   room.ready[color] = !!ready;
-  return { ok: true, started: maybeStart(room, now) };
+  return { ok: true, started: maybeStart(room, now, rand) };
 }
 
 function checkCell(room, color, cell) {
@@ -391,8 +504,11 @@ function claim(room, color, cell, now, by, free = false) {
   const bad = checkCell(room, color, cell);
   if (bad) return err(bad);
   if (markOf(room, cell, color)) return err("You already have that square.");
-  if (!canTake(room, color, cell)) return err("That square is already claimed.");
+  if (room.config.lockout && marksOn(room, cell).some((m) => !m.pending)) return err("That square is already claimed.");
   if (!seenOf(room, color).includes(cell)) return err("You can't see that square.");
+  // Only after the fog check, so the answer never says who a fogged square was drafted to.
+  if (room.config.draft && draftedOwner(room, cell) !== color)
+    return err(draftedOwner(room, cell) ? "That square was drafted to another color: only they can claim it." : "Nobody drafted that square, so nobody can claim it.");
   if (free && !(room.freeLeft[color] > 0)) return err("You have no Free Squares left.");
   if (free) room.freeLeft[color] -= 1;
   // The claim waits claimDelay seconds before it takes effect (settle() does that). Until then only your color sees
@@ -700,7 +816,7 @@ function viewFor(room, color, now, extras = {}) {
   const mineOnly = (c) => isPlayer && c === color;
   const cells = [];
   for (let i = 0; i < geo(room).total; i++) {
-    cells.push({
+    const cell = {
       i,
       name: canRead(i) ? room.board[i].name : null,
       // public, even under fog, once a claim takes effect; "until" = when your waiting claim takes effect
@@ -708,7 +824,10 @@ function viewFor(room, color, now, extras = {}) {
         .map((m) => (m.pending ? { color: m.color, free: !!m.free, by: m.by, pending: true, until: m.until } : { color: m.color, free: !!m.free, by: m.by })),
       seen: isPlayer ? seen.has(i) : true,
       chest: canRead(i) && room.chests.includes(i),
-    });
+    };
+    // Draft rooms: who a square was drafted to (null: nobody), only on squares you can read.
+    if (room.drafted && canRead(i)) cell.owner = draftedOwner(room, i);
+    cells.push(cell);
   }
   // Other colors' free squares spent on claims that are still waiting are counted as unspent.
   const freeLeft = { ...room.freeLeft };
@@ -729,6 +848,7 @@ function viewFor(room, color, now, extras = {}) {
     if (e.type === "claim" && e.gained && (everything || e.color === color)) out.gained = e.gained;
     if (e.type === "claim" && e.sniped) out.sniped = true;
     if (e.type === "snipe") Object.assign(out, { victim: e.victim, victimBy: e.victimBy || null });
+    if (e.type === "draft") Object.assign(out, { name: e.name, to: e.to });
     return out;
   });
   const view = {
@@ -763,12 +883,35 @@ function viewFor(room, color, now, extras = {}) {
   // faded never-revealed squares (shared fog too, where every color's list is the same).
   if (!isPlayer) view.seenBy = Object.fromEntries(room.colors.map((c) => [c, seenOf(room, c)]));
   if (everything && showBoard) view.cardSeed = room.cardSeed;
+  if (room.draft) view.draft = draftView(room, color, isPlayer, everything && showBoard, seen);
   return view;
+}
+
+// The draft as a page may see it: every goal in alphabetical order with who it was drafted to (public: everyone
+// watched the draft). Where a goal is on the card ("cell") only once the game has started, and then only for
+// spectators, at the end, and for your own color's goals you've revealed.
+function draftView(room, color, isPlayer, everything, seen) {
+  const d = room.draft;
+  const byRank = new Map(d.picks.map((p) => [p.rank, p]));
+  return {
+    order: d.order,
+    per: d.per,
+    reverse: !!room.config.reverseDraft,
+    picks: d.picks.length,
+    total: d.per * d.order.length,
+    turn: draftTurn(room),
+    goals: d.goals.map((cell, rank) => {
+      const p = byRank.get(rank);
+      const g = { rank, name: room.board[cell].name, to: p ? p.to : null, color: p ? p.color : null, by: p ? p.by : null };
+      if (room.started !== null && (everything || (isPlayer && p && p.to === color && seen.has(cell)))) g.cell = cell;
+      return g;
+    }),
+  };
 }
 
 module.exports = {
   SIZES, COLORS, GOALS, NOTE_KINDS, ON_CLAIM, CLAIM_DELAY, MAX_CLAIM_DELAY,
   geometry, neighbors, claimEffect, normalizeConfig, configProblems, createRoom, upgradeRoom, join, start, setReady, claim, cancelClaim,
   settle, nextPending, setAway, toggleNote, useLens, useAdjacent, adjacentTargets, requestUndo, answerUndo, endEarly, viewFor, checkEnd, leader,
-  claimable, seenOf, maxPlayers, recommendedPlayers,
+  claimable, seenOf, maxPlayers, recommendedPlayers, inLobby, draftTurn, draftPick, draftedTo,
 };

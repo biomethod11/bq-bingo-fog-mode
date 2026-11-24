@@ -172,24 +172,25 @@ class RoomHost {
     const times = [this.expiresAt()];
     const claim = Fog.nextPending(this.room);
     if (claim !== null) times.push(claim);
-    if (this.room.started === null) times.push(...this.awayAt.values());
+    if (Fog.inLobby(this.room)) times.push(...this.awayAt.values());
     return Math.min(...times);
   }
   reschedule() { this.schedule(this.nextWakeAt()); }
   changed() { this.save(this.room); this.broadcast(); this.reschedule(); }
 
   // Do whatever is due: claims whose undo timer ran out take effect, and players away too long before the start
-  // stop counting for Ready (which can start the game). Called on a timer and before every request.
+  // stop counting for Ready (which can start the game, or a Draft room's draft). Called on a timer and before every
+  // request.
   // Returns "expired" when the room should be deleted (a week without activity).
   wake() {
     const now = this.clock();
     if (now >= this.expiresAt()) return "expired";
     let dirty = Fog.settle(this.room, now) > 0;
-    if (this.room.started === null) {
+    if (Fog.inLobby(this.room)) {
       for (const [token, at] of this.awayAt) {
         if (at > now) continue;
         this.awayAt.delete(token);
-        if (!this.open.get(token) && Fog.setAway(this.room, token, true, now).changed) dirty = true;
+        if (!this.open.get(token) && Fog.setAway(this.room, token, true, now, random).changed) dirty = true;
       }
     } else this.awayAt.clear();
     if (dirty) { this.save(this.room); this.broadcast(); }
@@ -213,7 +214,7 @@ class RoomHost {
   info() {
     const r = this.room;
     const v = Fog.viewFor(r, null, this.clock());
-    return { id: r.id, config: r.config, goalText: v.goalText, filenameSeed: r.filenameSeed, started: r.started, ended: !!r.ended, players: v.players, colors: r.colors, password: !!r.pass };
+    return { id: r.id, config: r.config, goalText: v.goalText, filenameSeed: r.filenameSeed, started: r.started, drafting: !!r.draft && r.started === null, ended: !!r.ended, players: v.players, colors: r.colors, password: !!r.pass };
   }
 
   async join(body) {
@@ -265,7 +266,9 @@ class RoomHost {
     if (!color) result = { ok: false, error: "Spectators can't do that. Join with a color to play." };
     else {
       switch (body.type) {
-        case "ready": result = Fog.setReady(this.room, color, body.ready !== false, now); break;
+        case "ready": result = Fog.setReady(this.room, color, body.ready !== false, now, random); break;
+        // rank: a goal's place in the alphabetical list; ranks: several, when the color has that many picks in a row
+        case "draft": result = Fog.draftPick(this.room, color, Array.isArray(body.ranks) ? body.ranks.slice(0, 50).map(Number) : Number(body.rank), now, by, random); break;
         case "claim": result = Fog.claim(this.room, color, cell, now, by, body.free === true); break;
         case "cancel": result = Fog.cancelClaim(this.room, color, cell, now, by); break;
         case "note": result = Fog.toggleNote(this.room, color, cell, String(body.kind), by); break;
@@ -288,7 +291,7 @@ class RoomHost {
     if (!player) return null;
     this.open.set(token, (this.open.get(token) || 0) + 1);
     this.awayAt.delete(token);
-    if (player.away && Fog.setAway(this.room, token, false, this.clock()).changed) this.broadcast(); // back before the start
+    if (player.away && Fog.setAway(this.room, token, false, this.clock(), random).changed) this.broadcast(); // back before the start
     this.touch();
     this.save(this.room);
     const first = this.view(token);
@@ -304,7 +307,7 @@ class RoomHost {
       const left = (this.open.get(token) || 1) - 1;
       if (left > 0) { this.open.set(token, left); return; }
       this.open.delete(token);
-      if (this.room.started === null) { this.awayAt.set(token, this.clock() + this.awayAfter); this.reschedule(); }
+      if (Fog.inLobby(this.room)) { this.awayAt.set(token, this.clock() + this.awayAfter); this.reschedule(); }
     };
   }
 }

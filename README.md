@@ -49,6 +49,9 @@ board stays lined up.
 | Lockout | on | Off (BingoSync "non-lockout"): several colors can mark the same square, shown as split color bands |
 | Claim undo timer | on, 5 s | Lockout only: 1–10 seconds, or off. Until the timer runs out only your color sees a new claim, you can take it back, and a same-square race goes to the first click. Off: claims take effect at once. Rooms without lockout always use 5 seconds |
 | Shared fog | off | On: one view for everyone, so every reveal shows for every color |
+| Draft | off | Once every color is ready, a draft card in the board's place and shape shows the goals in **alphabetical order** (never with their place on the real card) and the colors take turns drafting them, in a random snake order (1-2-2-1...; two picks in a row are chosen together and confirmed once), until each has the same number (5x5 with 2 colors: 12 each). A goal left over isn't drafted and nobody can claim it. Then the card appears: each color starts with **two of its own drafted squares** revealed (random ones, unless the next setting is on) instead of the center and an edge square, every revealed square is **outlined in the color it was drafted to**, and you can **only claim your own color's squares**. Once the draft starts, new colors can't join (teammates and spectators can) |
+| Reverse Draft | off | Draft only: you draft for another color instead of your own (2 colors: for each other; more: always for the next color in the draft order) |
+| Start on the two easiest squares | off | Draft only: start on your first two picks (with Reverse Draft, the last two goals picked for you) instead of two random squares from your draft |
 | Starting Free Squares | off | 1–3 per color, claimed without doing the goal (press **Choose FREE square** first). A Free Square shows **striped, with a dashed border and a FREE tag**, even in the fog |
 | Free Square Reveals | on | Off: a Free Square doesn't reveal anything or give any reveals |
 | Starting Free Reveals | off | 1–3 Free Reveals per color at the start |
@@ -71,7 +74,11 @@ shared fog and anything other than Choose 1 or Free 1 (86-99% of the board ends 
   simulations), every color stands out from an empty square, and all text on a color meets WCAG 4.5:1 contrast
   (`palette_check.py` checks this). People on the same color are a team and share fog.
 - **Start:** every color sees the center square plus one random edge or corner square, a different one for each
-  color. 4x4 and 6x6 have no single center, so you get the central square nearest your edge square.
+  color. 4x4 and 6x6 have no single center, so you get the central square nearest your edge square. In a Draft room
+  you start with two squares from your own draft instead (random, or your two easiest).
+- **Draft rooms:** the draft list shows every goal's name and who it went to, to everyone, but nothing says where a
+  goal is on the card: picks name a goal by its place in the alphabetical list, and a square's owner is only sent
+  once you can read the square.
 - **Player limits:** a lockout room takes 4 players, a non-lockout room 16 (spectators don't count). The join form
   and Help recommend a maximum for each board and setting, from simulated games (below).
 - **Leaving before the start:** only colors with someone present have to press Ready. If the game starts while
@@ -126,7 +133,7 @@ npm run deploy:cloudflare
 
 | File | What |
 |---|---|
-| `fog_logic.js` | The rules: joining, start squares, player limits, fog, claims and the claim undo timer, reveals, Free Squares, Free Reveals, Bonus Reveal Squares, undo, and exactly what each player may see. Pure code, no I/O. Its top comment lists the names the code uses for each setting (`lens` = Free Reveals, `chests` = Bonus Reveal Squares, ...) |
+| `fog_logic.js` | The rules: joining, start squares, player limits, the draft, fog, claims and the claim undo timer, reveals, Free Squares, Free Reveals, Bonus Reveal Squares, undo, and exactly what each player may see. Pure code, no I/O. Its top comment lists the names the code uses for each setting (`lens` = Free Reveals, `chests` = Bonus Reveal Squares, ...) |
 | `room_host.js` | One live room, the same on both platforms: the room's API, live updates (Server-Sent Events) that only go to pages whose view changed, timers, passwords, room expiry |
 | `fog.html` | The whole page: main page, join form, the room, and Help |
 | `fog_server.js` | The Node server: rooms as JSON files, timers, HTTP |

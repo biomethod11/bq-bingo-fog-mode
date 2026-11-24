@@ -42,7 +42,9 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
   await check("defaults: Open, Free Reveals off, no free squares, private fog, Reveal 4, 5-second claim wait", () => {
     const c = Fog.normalizeConfig({});
     assert.deepStrictEqual(c, { goal: "open", size: 5, onClaim: "reveal4", sharedFog: false, lens: 0, chests: 0, free: 0, freeReveals: true, lockout: true,
-      noteShare: { silver: "private", square: "private", x: "private", circle: "private" }, claimDelay: 5 });
+      noteShare: { silver: "private", square: "private", x: "private", circle: "private" }, claimDelay: 5, draft: false, reverseDraft: false, draftEasiest: false });
+    assert.strictEqual(Fog.normalizeConfig({ reverseDraft: true }).reverseDraft, false, "Reverse Draft is part of Draft");
+    assert.strictEqual(Fog.normalizeConfig({ draftEasiest: true }).draftEasiest, false, "so is Start on the two easiest");
     assert.strictEqual(Fog.normalizeConfig({ chests: 3 }).chests, 3, "Bonus Reveal Squares no longer need Free Reveals on");
     assert.strictEqual(Fog.normalizeConfig({ lens: 5 }).lens, 3, "starting Free Reveals: 1-3");
   });
@@ -665,6 +667,219 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
     assert.ok(Fog.viewFor(r, "blue", 5).cells.every((c) => c.name));
   });
 
+  // A Draft room on a card whose goal names don't sort in board order, with every color ready (so the draft is on).
+  const NAMES = ["Kokiri Sword", "Bottle", "Zora Tunic", "Hylian Shield", "Ice Arrows", "Deku Nuts", "Fire Arrows", "Megaton Hammer",
+    "Lens of Truth", "Goron Tunic", "Hover Boots", "Iron Boots", "Boomerang", "Fairy Bow", "Slingshot", "Bombchus", "Dins Fire",
+    "Farores Wind", "Nayrus Love", "Silver Gauntlets", "Golden Scale", "Mirror Shield", "Light Arrows", "Biggoron Sword", "Hookshot"];
+  const mkDraft = (config = {}, { colors = ["red", "blue"], rand = () => 0.5 } = {}) => {
+    const room = Fog.createRoom({ id: "d", board: NAMES.map((name, i) => ({ name, difficulty: i, types: [] })), cardSeed: "111", filenameSeed: "222", config: { draft: true, claimDelay: 0, ...config }, now: 0, rand });
+    const names = { red: "Ann", blue: "Bo", green: "Cy" };
+    colors.forEach((c) => Fog.join(room, `tok-${c}`, names[c], c, 0));
+    colors.forEach((c) => Fog.setReady(room, c, true, 10, rand));
+    return room;
+  };
+  // Pick for whoever's turn it is until the draft is over (always the first goal left in the list).
+  const draftAll = (room) => {
+    let turn;
+    while ((turn = Fog.draftTurn(room))) {
+      const g = Fog.viewFor(room, turn.color, 20).draft.goals.find((x) => !x.to);
+      assert.ok(Fog.draftPick(room, turn.color, g.rank, 20, turn.color).ok);
+    }
+  };
+
+  await check("draft: Ready starts the draft, not the game; goals listed alphabetically without their places", () => {
+    const r = mkDraft();
+    assert.strictEqual(r.started, null, "no card yet");
+    assert.ok(r.draft && Fog.inLobby(r) === false);
+    assert.deepStrictEqual(r.draft.order.slice().sort(), ["blue", "red"], "a random order of the colors");
+    assert.strictEqual(r.draft.per, 12, "25 goals, 2 colors: 12 each, 1 left over");
+    assert.strictEqual(Fog.setReady(r, "red", false, 11).ok, false, "Ready is over");
+    const v = Fog.viewFor(r, "red", 11);
+    assert.deepStrictEqual(v.draft.goals.map((g) => g.name), NAMES.slice().sort((a, b) => a.localeCompare(b)));
+    assert.ok(v.draft.goals.every((g) => g.cell === undefined), "no places on the card");
+    assert.ok(v.cells.every((c) => c.name === null && c.owner === undefined), "and no card");
+    const spec = Fog.viewFor(r, null, 11);
+    assert.ok(spec.cells.every((c) => c.name === null) && spec.draft.goals.every((g) => g.cell === undefined), "spectators can't see places either");
+    assert.ok(Fog.viewFor(r, "red", 11).log.some((e) => e.type === "draft-start"));
+  });
+
+  await check("draft: snake order, your turn only, each goal once; the last pick starts the game", () => {
+    const r = mkDraft({}, { colors: ["red", "blue", "green"] });
+    const [a, b, c] = r.draft.order;
+    const turns = [];
+    for (let k = 0; k < 6; k++) {
+      const turn = Fog.draftTurn(r);
+      turns.push(turn.color);
+      assert.strictEqual(turn.to, turn.color, "a normal draft is for yourself");
+      const other = r.draft.order.find((x) => x !== turn.color);
+      assert.strictEqual(Fog.draftPick(r, other, k, 20, "x").error, "It's not your color's turn to draft.");
+      if (k) assert.strictEqual(Fog.draftPick(r, turn.color, 0, 20, "x").error, "That goal has already been drafted.");
+      assert.ok(Fog.draftPick(r, turn.color, k, 20, "x").ok);
+    }
+    assert.deepStrictEqual(turns, [a, b, c, c, b, a]);
+    assert.strictEqual(Fog.draftPick(r, Fog.draftTurn(r).color, 99, 20, "x").error, "That isn't a goal on this card.");
+    draftAll(r);
+    assert.strictEqual(r.started, 20, "the game starts on the last pick");
+    assert.strictEqual(r.draft.picks.length, 24, "8 each");
+    for (const col of r.colors) assert.strictEqual(Fog.draftedTo(r, col).length, 8);
+    assert.strictEqual(Object.keys(r.drafted).length, 24, "one goal nobody drafted");
+    assert.strictEqual(Fog.draftTurn(r), null);
+    assert.strictEqual(Fog.draftPick(r, a, 24, 21, "x").error, "There's no draft going on.");
+    const entry = r.log.find((e) => e.type === "draft");
+    assert.ok(entry.name && entry.cell === undefined, "the log names the goal, never its place");
+  });
+
+  await check("draft: each color starts seeing two of its own drafted squares, nothing else", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      let x = seed;
+      const rand = () => ((x = (x * 16807) % 2147483647) / 2147483647);
+      const r = mkDraft({ chests: 3 }, { rand });
+      draftAll(r);
+      for (const col of r.colors) {
+        const seen = Fog.seenOf(r, col);
+        assert.strictEqual(seen.length, 2);
+        assert.ok(seen.every((i) => r.drafted[i] === col), "your own squares, not the center or an edge");
+        assert.ok(seen.every((i) => !r.chests.includes(i)), "not Bonus Reveal Squares while you have others");
+      }
+    }
+    const shared = mkDraft({ sharedFog: true });
+    draftAll(shared);
+    assert.strictEqual(Fog.seenOf(shared, "red").length, 4, "shared fog: everyone's two");
+  });
+
+  await check("draft: you can only claim squares drafted to you; the answer never gives a fogged square away", () => {
+    const r = mkDraft();
+    draftAll(r);
+    const mine = Fog.seenOf(r, "red");
+    claim(r, "red", mine[0]);
+    const theirs = Fog.seenOf(r, "red").find((i) => r.drafted[i] === "blue");
+    const fogBlue = Fog.draftedTo(r, "blue").find((i) => !Fog.seenOf(r, "red").includes(i));
+    const fogMine = Fog.draftedTo(r, "red").find((i) => !Fog.seenOf(r, "red").includes(i));
+    if (theirs !== undefined) assert.match(Fog.claim(r, "red", theirs, 30000).error, /drafted to another color/);
+    assert.strictEqual(Fog.claim(r, "red", fogBlue, 30000).error, "You can't see that square.");
+    assert.strictEqual(Fog.claim(r, "red", fogMine, 30000).error, "You can't see that square.", "same answer for your own fogged squares");
+    const leftover = [...Array(25).keys()].find((i) => !r.drafted[i]);
+    r.seen.red = [...new Set([...Fog.seenOf(r, "red"), leftover])].sort((a, b) => a - b); // as if revealed
+    assert.strictEqual(Fog.claim(r, "red", leftover, 30000).error, "Nobody drafted that square, so nobody can claim it.");
+    assert.ok(Fog.claimable(r, "red").every((i) => r.drafted[i] === "red"));
+    assert.ok(Fog.claim(r, "red", mine[1], 31000).ok);
+  });
+
+  await check("draft: boxed in only while a square drafted to you is still in the fog", () => {
+    const r = mkDraft();
+    draftAll(r);
+    walk(r, "red", Fog.seenOf(r, "red").filter((i) => r.drafted[i] === "red"));
+    // Reveal everything but red's squares: red has nothing to claim and its squares are fogged, so it's boxed in.
+    r.seen.red = [...Array(25).keys()].filter((i) => r.drafted[i] !== "red" || (r.claims[i] || []).length);
+    assert.strictEqual(Fog.viewFor(r, "red", 40000).stuck, true);
+    // Every red square in view and claimed: more reveals can't help, so no bonus reveal.
+    r.seen.red = [...Array(25).keys()];
+    walk(r, "red", Fog.draftedTo(r, "red").filter((i) => !(r.claims[i] || []).length));
+    assert.strictEqual(Fog.viewFor(r, "red", 90000).stuck, false);
+  });
+
+  await check("draft: the outline color is only sent for squares you can read; your goals' places only once revealed", () => {
+    const r = mkDraft();
+    draftAll(r);
+    const v = Fog.viewFor(r, "red", 30000);
+    for (const c of v.cells) {
+      if (c.seen) assert.strictEqual(c.owner, r.drafted[c.i] || null);
+      else assert.strictEqual(c.owner, undefined, `owner of fogged square ${c.i} leaked`);
+    }
+    const seen = new Set(Fog.seenOf(r, "red"));
+    for (const g of v.draft.goals) {
+      if (g.cell !== undefined) assert.ok(g.to === "red" && seen.has(g.cell), "only your own revealed goals have a place");
+    }
+    assert.strictEqual(v.draft.goals.filter((g) => g.cell !== undefined).length, 2);
+    assert.strictEqual(v.draft.goals.filter((g) => g.to).length, 24, "who drafted what stays public");
+    const sp = Fog.viewFor(r, null, 30000);
+    assert.ok(sp.cells.every((c) => c.owner !== undefined) && sp.draft.goals.every((g) => g.cell !== undefined), "spectators see it all");
+    assert.ok(!JSON.stringify(v).includes('"drafted"') && !JSON.stringify(v.log).includes('"cell"'));
+  });
+
+  await check("reverse draft: each color drafts for the next one in the order", () => {
+    const r = mkDraft({ reverseDraft: true }, { colors: ["red", "blue", "green"] });
+    const order = r.draft.order;
+    for (let k = 0; k < 6; k++) {
+      const turn = Fog.draftTurn(r);
+      assert.strictEqual(turn.to, order[(order.indexOf(turn.color) + 1) % 3]);
+      Fog.draftPick(r, turn.color, k, 20, "x");
+    }
+    draftAll(r);
+    for (const col of r.colors) assert.strictEqual(Fog.draftedTo(r, col).length, 8, "everyone still gets the same number");
+    assert.ok(r.draft.picks.every((p) => p.to !== p.color), "nobody drafts for themselves");
+    const two = mkDraft({ reverseDraft: true });
+    const t = Fog.draftTurn(two);
+    assert.notStrictEqual(t.to, t.color, "with 2 colors, for the other one");
+  });
+
+  await check("draft: two picks in a row (the turn of a snake round) can be made in one go, all or nothing", () => {
+    const r = mkDraft();
+    const [a, b] = r.draft.order;
+    assert.deepStrictEqual([Fog.draftTurn(r).color, Fog.draftTurn(r).streak], [a, 1], "the first pick is on its own");
+    assert.strictEqual(Fog.draftPick(r, a, [0, 1], 20, "x").error, "You have one pick right now.");
+    assert.ok(Fog.draftPick(r, a, [0], 20, "x").ok, "a list of one works too");
+    assert.deepStrictEqual([Fog.draftTurn(r).color, Fog.draftTurn(r).streak], [b, 2]);
+    assert.strictEqual(Fog.draftPick(r, b, [1, 2, 3], 20, "x").error, "You have 2 picks in a row right now.");
+    assert.strictEqual(Fog.draftPick(r, b, [4, 4], 20, "x").error, "You chose the same goal twice.");
+    assert.strictEqual(Fog.draftPick(r, b, [5, 0], 20, "x").error, "That goal has already been drafted.");
+    assert.strictEqual(r.draft.picks.length, 1, "nothing was drafted by a refused pair");
+    assert.ok(Fog.draftPick(r, b, [7, 3], 20, "x").ok);
+    assert.deepStrictEqual(r.draft.picks.map((p) => [p.rank, p.color]), [[0, a], [7, b], [3, b]], "in the order chosen");
+    assert.deepStrictEqual([Fog.draftTurn(r).color, Fog.draftTurn(r).streak], [a, 2]);
+    assert.ok(Fog.draftPick(r, a, 9, 20, "x").ok, "you can still make them one at a time");
+    assert.deepStrictEqual([Fog.draftTurn(r).color, Fog.draftTurn(r).streak], [a, 1]);
+    assert.strictEqual(r.log.filter((e) => e.type === "draft").length, 4, "one log line per goal");
+    const solo = mkDraft({}, { colors: ["red"] });
+    assert.strictEqual(Fog.draftTurn(solo).streak, 25, "solo: every pick is yours");
+    // The draft's last pick has no pair: 2 colors, 24 picks, the last two rounds go b,a then a,b... the 24th stands alone.
+    const end = mkDraft();
+    while (end.draft.picks.length < 23) { const t = Fog.draftTurn(end); Fog.draftPick(end, t.color, Fog.viewFor(end, null, 20).draft.goals.find((g) => !g.to).rank, 20, "x"); }
+    assert.strictEqual(Fog.draftTurn(end).streak, 1);
+  });
+
+  await check("draft: start squares are random, or with Start on the two easiest your first two picks (Reverse: the last two picked for you)", () => {
+    const easy = mkDraft({ draftEasiest: true, chests: 6 });
+    const firstTwo = {};
+    while (Fog.draftTurn(easy)) {
+      const t = Fog.draftTurn(easy);
+      const rank = Fog.viewFor(easy, null, 20).draft.goals.find((g) => !g.to).rank;
+      if ((firstTwo[t.to] = firstTwo[t.to] || []).length < 2) firstTwo[t.to].push(easy.draft.goals[rank]);
+      Fog.draftPick(easy, t.color, rank, 20, "x");
+    }
+    for (const c of easy.colors) assert.deepStrictEqual(Fog.seenOf(easy, c), firstTwo[c].sort((x, y) => x - y), `${c}: its first two picks, Bonus Reveal Squares or not`);
+    const rev = mkDraft({ draftEasiest: true, reverseDraft: true });
+    const lastTwo = {};
+    while (Fog.draftTurn(rev)) {
+      const t = Fog.draftTurn(rev);
+      const rank = Fog.viewFor(rev, null, 20).draft.goals.find((g) => !g.to).rank;
+      (lastTwo[t.to] = lastTwo[t.to] || []).push(rev.draft.goals[rank]);
+      Fog.draftPick(rev, t.color, rank, 20, "x");
+    }
+    for (const c of rev.colors) assert.deepStrictEqual(Fog.seenOf(rev, c), lastTwo[c].slice(-2).sort((x, y) => x - y), `${c}: the last two picked for it`);
+    // Random (the default) changes with the room's random draw.
+    const starts = new Set();
+    for (const v of [0.1, 0.3, 0.6, 0.9]) { const r = mkDraft({}, { rand: () => v }); draftAll(r); starts.add(JSON.stringify(Fog.seenOf(r, "red"))); }
+    assert.ok(starts.size > 1);
+  });
+
+  await check("draft: once it starts no new colors can join (teammates and spectators can); away doesn't count any more", () => {
+    const r = mkDraft();
+    assert.match(Fog.join(r, "tok-green", "Cy", "green", 30).error, /draft has started/);
+    assert.ok(Fog.join(r, "tok-red2", "Ann2", "red", 30).ok, "a teammate on a drafted color");
+    assert.ok(Fog.join(r, "tok-sp", "Viewer", null, 30).ok);
+    assert.strictEqual(Fog.setAway(r, "tok-blue", true, 31).changed, false);
+    assert.ok(Fog.join(r, "tok-blue", "Bo", null, 32).ok && r.colors.includes("blue"), "a color isn't dropped during the draft");
+    assert.ok(Fog.join(r, "tok-blue", "Bo", "blue", 33).ok, "and its player can come back to it");
+    // In the lobby, a player who left still doesn't hold the draft up.
+    const lobby = Fog.createRoom({ id: "d2", board: fakeBoard, cardSeed: "1", filenameSeed: "2", config: { draft: true }, now: 0, rand: () => 0.5 });
+    ["red", "blue", "green"].forEach((c) => Fog.join(lobby, `tok-${c}`, c, c, 0));
+    Fog.setReady(lobby, "red", true, 1);
+    Fog.setReady(lobby, "blue", true, 2);
+    Fog.setAway(lobby, "tok-green", true, 3);
+    assert.ok(lobby.draft && lobby.started === null && lobby.draft.order.length === 2 && !lobby.colors.includes("green"));
+  });
+
   console.log("server");
   const cardFor = loadGenerator();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fog-test-"));
@@ -852,6 +1067,52 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
     const visible = new Set(Fog.seenOf(room, "red"));
     assert.strictEqual(visible.size, 3);
     for (let i = 0; i < 36; i++) assert.strictEqual(raw.includes(JSON.stringify(card[i].name)), visible.has(i), `square ${i}`);
+  });
+
+  await check("a Draft room over HTTP: draft by rank; the board never places a goal you haven't revealed", async () => {
+    const r = await call("/api/rooms", { name: "Ann", color: "red", draft: true, reverseDraft: true, filenameSeed: "812345", cardSeed: "4243" });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    const rid = r.data.id, tok = { red: r.data.token };
+    tok.blue = (await call(`/api/rooms/${rid}/join`, { name: "Bo", color: "blue" })).data.token;
+    await call(`/api/rooms/${rid}/action?t=${tok.red}`, { type: "ready" });
+    await call(`/api/rooms/${rid}/action?t=${tok.blue}`, { type: "ready" });
+    const info = (await call(`/api/rooms/${rid}/info`)).data;
+    assert.ok(info.drafting && info.config.draft && info.config.reverseDraft);
+    assert.strictEqual((await call(`/api/rooms/${rid}/join`, { name: "Cy", color: "green" })).status, 400, "no new colors during the draft");
+    const card = cardFor("4243");
+    let s = (await call(`/api/rooms/${rid}/state?t=${tok.red}`)).data;
+    // During the draft the names are public; their places on the card are not.
+    assert.ok(s.cells.every((c) => c.name === null) && s.draft.goals.every((g) => g.cell === undefined));
+    assert.strictEqual((await call(`/api/rooms/${rid}/action?t=${tok[s.draft.turn.color === "red" ? "blue" : "red"]}`, { type: "draft", rank: 0 })).status, 400, "not your turn");
+    let pairs = 0;
+    while (s.draft.turn) {
+      // Two picks in a row go in one request.
+      const turn = s.draft.turn, goals = s.draft.goals.filter((g) => !g.to).slice(0, turn.streak);
+      const res = await call(`/api/rooms/${rid}/action?t=${tok[turn.color]}`, goals.length > 1 ? { type: "draft", ranks: goals.map((g) => g.rank) } : { type: "draft", rank: goals[0].rank });
+      assert.ok(res.data.ok, res.data.error);
+      if (goals.length > 1) pairs++;
+      s = (await call(`/api/rooms/${rid}/state?t=${tok.red}`)).data;
+      for (const g of goals) assert.strictEqual(s.draft.goals[g.rank].to, turn.to, "reverse: drafted to the other color");
+    }
+    assert.strictEqual(pairs, 11, "24 picks: 1 + 11 pairs + 1");
+    assert.ok(s.started, "the last pick starts the game");
+    const room = rooms.get(rid);
+    const visible = new Set(Fog.seenOf(room, "red"));
+    assert.strictEqual(visible.size, 2);
+    assert.ok([...visible].every((i) => room.drafted[i] === "red"));
+    const raw = JSON.stringify(s);
+    // Every goal's name is in the draft list, so the check is on places: only revealed squares have a name or an
+    // owner on the board, and only your revealed goals have a cell in the list.
+    for (let i = 0; i < 25; i++) {
+      assert.strictEqual(s.cells[i].name !== null, visible.has(i), `square ${i}`);
+      assert.strictEqual(s.cells[i].owner !== undefined, visible.has(i), `owner of ${i}`);
+    }
+    assert.deepStrictEqual(s.draft.goals.filter((g) => g.cell !== undefined).map((g) => g.cell).sort((a, b) => a - b), [...visible].sort((a, b) => a - b));
+    assert.ok(s.draft.goals.every((g) => g.cell === undefined || card[g.cell].name === g.name));
+    assert.ok(!raw.includes('"drafted"') && !raw.includes('"draftStarts"') && !raw.includes('"cardSeed"'));
+    const blueSquare = Fog.draftedTo(room, "blue").find((i) => visible.has(i)) ?? Fog.draftedTo(room, "blue")[0];
+    assert.strictEqual((await call(`/api/rooms/${rid}/action?t=${tok.red}`, { type: "claim", cell: blueSquare })).status, 400, "not red's square");
+    assert.ok((await call(`/api/rooms/${rid}/action?t=${tok.red}`, { type: "claim", cell: [...visible][0] })).data.ok, "red's own");
   });
 
   await check("a waiting claim settles on its own and is pushed to everyone (real clock, 1 s wait)", async () => {

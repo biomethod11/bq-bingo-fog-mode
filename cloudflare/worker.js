@@ -12,7 +12,7 @@
 //   POST /api/rooms/<code>/join      join (or rejoin) with a nickname and color, or as a spectator
 //   GET  /api/rooms/<code>/state     the room as this player may see it (?t=<token>)
 //   GET  /api/rooms/<code>/events    live updates (Server-Sent Events, ?t=<token>)
-//   POST /api/rooms/<code>/action    claim, reveal, undo, ready, note, end... (?t=<token>)
+//   POST /api/rooms/<code>/action    claim, reveal, undo, ready, draft, note, end... (?t=<token>)
 import { DurableObject } from "cloudflare:workers";
 import roomHostLib from "../room_host.js";
 import board from "../board.js";
