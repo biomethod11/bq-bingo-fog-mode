@@ -41,6 +41,10 @@ BingoSync.
 Spectators can watch the whole card, or exactly what any one player sees. There's also a streamer mode that hides
 the room code, and note symbols you can put on squares (right-click, Ctrl, Alt or Shift+click).
 
+The card and the player list never move while you play (messages appear below the player list), so a stream scene
+can be cropped to them. The page works on phones too: a goal too long for its square is set in smaller text instead
+of being cut off, and messages pop up at the bottom of the screen.
+
 ## Settings
 
 | Setting | Options |
