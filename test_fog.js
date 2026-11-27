@@ -1049,12 +1049,17 @@ const walk = (room, color, cells) => cells.forEach((c) => claim(room, color, c))
       return JSON.parse(ev.split("\n").find((l) => l.startsWith("data: ")).slice(6));
     };
     assert.strictEqual((await nextEvent()).you.color, "blue");
-    await call(`/api/rooms/${id}/action?t=${red}`, { type: "claim", cell: 7 }); // hidden from blue: no push
+    // A square red has revealed (next to the center) that blue can't see: not touching blue's random start square,
+    // whose free claim reveals the squares around it to blue.
+    const bh = rooms.get(id).homes.blue;
+    const touches = (a, b) => Math.abs(Math.floor(a / 5) - Math.floor(b / 5)) <= 1 && Math.abs((a % 5) - (b % 5)) <= 1;
+    const cell = [7, 11, 13, 17].find((i) => !touches(i, bh));
+    await call(`/api/rooms/${id}/action?t=${red}`, { type: "claim", cell }); // hidden from blue: no push
     now += 5_000;
     await call(`/api/rooms/${id}/state?t=${red}`); // any request settles it
     const second = await nextEvent(); // so blue's next push is the one where the claim took effect
-    assert.strictEqual(second.cells[7].marks[0].color, "red");
-    assert.strictEqual(second.cells[7].name, null, "blue can't read red's square");
+    assert.strictEqual(second.cells[cell].marks[0].color, "red");
+    assert.strictEqual(second.cells[cell].name, null, "blue can't read red's square");
     ctrl.abort();
   });
 
